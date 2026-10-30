@@ -11,6 +11,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Address of the chat site over Tailscale (falls back to this PC's name)
+SITE="http://$(tailscale status --json 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["Self"]["DNSName"].rstrip("."))' 2>/dev/null || uname -n):3100"
 COMPANIES="$ROOT/companies"
 UNITS="$HOME/.config/systemd/user"
 
@@ -74,8 +76,9 @@ cmd_start() {
     echo "== First data refresh running in the background (see: journalctl --user -fu sapb1-ai-refresh@$id)"
     systemctl --user start --no-block "sapb1-ai-refresh@$id"
   fi
-  echo "Started. On http://$(uname -n):3100, add people to the group \"$(get "$id" COMPANY_NAME)\" (Admin Panel > Users > Groups)."
-  echo "Only that group (and admins) see this company in the menu."
+  echo "Started. On $SITE, add people to the group \"$(get "$id" COMPANY_NAME)\" (Admin Panel > Users > Groups)."
+  echo "Only that group (and admins) see this company; its members log in with it already selected."
+  echo "Company link (opens this company, after the login if needed): $SITE/?model=$(get "$id" AGENT_MODEL_ID)"
 }
 
 cmd_stop() {
@@ -90,6 +93,8 @@ cmd_list() {
     local on=no; systemctl --user is-enabled --quiet "sapb1-ai-agent@$id" && on=yes
     printf '%-12s %-14s %-6s %-9s %s\n' "$id" "$(get "$id" SAPB1_DB)" ":$(get "$id" AGENT_PORT)" "$on" "$(get "$id" COMPANY_NAME)"
   done
+  echo; echo "Site: $SITE   Company links (log in straight into that company):"
+  for id in $(ids); do printf '  %-12s %s/?model=%s\n' "$id" "$SITE" "$(get "$id" AGENT_MODEL_ID)"; done
 }
 
 cmd_site() {

@@ -3,7 +3,8 @@
 The model menu at the top of the chat is the company selector. Each company stays separate behind it: its own chat
 service, SQL login and data. On the site:
   register  (./company.sh, site level) one connection per started company to its own chat service, one group per
-            company, and the company's menu entry readable only by that group. Open WebUI hides the entry from
+            company (with that company preselected for its members), and the company's menu entry readable only by
+            that group. Open WebUI hides the entry from
             everyone else and refuses chats with it. The site-wide pop-up and suggestions carry no company data.
   publish   (nightly, per company) the company's warning line and suggested questions, shown on the start page
             while that company is selected.
@@ -39,7 +40,7 @@ GENERIC_SUGGESTIONS = [
 _SITE_SCRIPT = r"""
 import asyncio, json, logging, sqlite3, sys, time
 logging.disable(logging.CRITICAL)
-from open_webui.models.groups import GroupForm, Groups
+from open_webui.models.groups import GroupForm, Groups, GroupUpdateForm
 from open_webui.models.models import ModelForm, Models
 from open_webui.models.users import Users
 
@@ -84,6 +85,12 @@ async def register():
         if group is None:
             group = await Groups.insert_new_group(admin.id, GroupForm(
                 name=c["name"], description=f"People who may use SAP B1 AI for {c['name']} ({c['database']})"))
+        # Members log in with their company already selected (someone in several groups gets the oldest group's).
+        data = group.data or {}
+        if ((data.get("config") or {}).get("default_models")) != [c["model_id"]]:
+            data = data | {"config": (data.get("config") or {}) | {"default_models": [c["model_id"]]}}
+            await Groups.update_group_by_id(group.id, GroupUpdateForm(
+                name=group.name, description=group.description, permissions=group.permissions, data=data))
         grants = [{"principal_type": "group", "principal_id": group.id, "permission": "read"}]
         model = await Models.get_model_by_id(c["model_id"])
         if model is None:
