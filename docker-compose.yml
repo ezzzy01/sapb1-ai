@@ -1,28 +1,25 @@
-# SAP B1 AI chat site, one per company: own container, own data volume (accounts, chats), own port.
-# Settings come from the company file, so always start it through company.sh (or with --env-file):
-#   ./company.sh start <id>       Open: http://<desktop>:<WEBUI_PORT>
-# Separate from the personal Open WebUI (~/local-ai, port 3000). Shares only the Ollama model (it keeps nothing).
-name: ${WEBUI_PROJECT:?start with ./company.sh start <id>}
+# SAP B1 AI chat site, shared by all companies. People pick their company in the model menu and only see the
+# companies whose group they are in; each company has its own chat service, SQL login and data behind it.
+# Companies are put on the site by ./company.sh (connections, groups, access), not here.
+#   Start:  ./company.sh site      Open: http://<desktop>:3100
+# Separate from the personal Open WebUI (~/local-ai, port 3000).
+name: sapb1-ai
 
 services:
   webui:
     image: ghcr.io/open-webui/open-webui:main
-    container_name: ${WEBUI_CONTAINER:?}
+    container_name: sapb1-ai-webui
     restart: unless-stopped
     ports:
-      - "${WEBUI_PORT:?}:8080"
+      - "3100:8080"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
-      WEBUI_NAME: ${WEBUI_NAME:-SAP B1 AI}
-      # Only this company's chat service; no direct model or internet access from the site itself.
+      WEBUI_NAME: "SAP B1 AI"
+      # Only the companies' chat services (set by ./company.sh); no direct model or internet access from the site.
       ENABLE_OLLAMA_API: "false"
-      ENABLE_OPENAI_API: "true"
-      OPENAI_API_BASE_URL: "http://host.docker.internal:${AGENT_PORT:?}/v1"
-      OPENAI_API_KEY: ${AGENT_API_KEY:?}
-      DEFAULT_MODELS: "sapb1-stock-assistant"
       ENABLE_WEB_SEARCH: "false"
-      # Privacy: chats stay with the person who wrote them.
+      # Privacy: chats stay with the person who wrote them; admins see every company but not users' chats.
       ENABLE_ADMIN_CHAT_ACCESS: "false"
       ENABLE_ADMIN_EXPORT: "false"
       ENABLE_COMMUNITY_SHARING: "false"
@@ -30,8 +27,6 @@ services:
       SCARF_NO_ANALYTICS: "true"
       DO_NOT_TRACK: "true"
       ANONYMIZED_TELEMETRY: "false"
-      # Start-page suggestions until the first nightly refresh writes this company's own (source: webui/suggestions.json)
-      DEFAULT_PROMPT_SUGGESTIONS: '[{"title": ["How is the business doing?", "What needs a decision today"], "content": "How is the business doing and what needs a decision today? Keep it short."}, {"title": ["Cash outlook", "Will we have enough cash?"], "content": "Will we have enough cash over the next 13 weeks? Show the lowest point and what drives it."}, {"title": ["Who owes us money?", "Overdue customers"], "content": "Who owes us money? Show overdue customer invoices, biggest amounts first, and who is likely to pay late."}, {"title": ["Invoices to check", "Duplicates, overcharges, red flags"], "content": "Which recent invoices or payments should finance check? Show possible duplicates, overcharges and other red flags, with the money involved."}, {"title": ["Margins", "Which customers and items earn the least?"], "content": "How are our margins? Show the customers and items with the lowest margin and whether it is getting better or worse."}, {"title": ["Today''s morning briefing", "Risks, money, sales, market"], "content": "Show me today''s morning briefing."}, {"title": ["What should we order", "this week, and why?"], "content": "What should we order this week? Show item, quantity, value and why."}]'
     volumes:
       - webui-data:/app/backend/data
       # Fiori Horizon theme: custom.css imports webui/fiori.css; edits apply on browser refresh.

@@ -40,7 +40,10 @@ Code is in `src/sapb1_ai/`: `sync.py` (B1 extract, incremental), `forecast.py`, 
 
 ## Several companies
 
-Each company gets its own SAP B1 AI, and nothing is shared between them except the AI model, which keeps nothing:
+All companies share one chat site (`:3100`). The model menu at the top of the chat is the company selector, and
+each person sees only the companies whose group they are in (Admin Panel → Users → Groups; admins see all).
+Open WebUI also refuses chats with a company outside the person's groups. Behind each menu entry, nothing is shared
+except the AI model, which keeps nothing:
 
 | Per company | Where |
 |---|---|
@@ -48,15 +51,15 @@ Each company gets its own SAP B1 AI, and nothing is shared between them except t
 | Critical items, market topics | `companies/<id>/*.csv` |
 | Nightly data | `data/<B1 database>/` |
 | Chat service | `sapb1-ai-agent@<id>` on its own port |
-| Chat site, accounts and chats | its own Open WebUI container and volume, on its own port |
+| Menu entry, group, start-page warning and suggestions | on the chat site, set by `./company.sh` and the nightly run |
 
 A process started for one company reads only that company's file, never the shared `.env`. The chat can only query its
 own database, and admins can't read users' chats. For full separation give each company a SQL login that can open only
-its own database.
+its own database. A chat belongs to the person who wrote it; start a new chat when switching company.
 
 ```
 ./company.sh add <id> <B1 database> "<name shown>"   # then fill in its SQL login in companies/<id>/company.env
-./company.sh start <id>                              # checks the login, starts its chat service and site
+./company.sh start <id>                              # checks the login, starts its chat service, adds it to the menu
 ./company.sh list
 ```
 
@@ -65,7 +68,7 @@ its own database.
 1. Create a read-only SQL login per B1 company database (`db_datareader` on that database only).
 2. `cp .env.example .env` and fill in the SQL host (used as the default for new companies).
 3. `uv sync`; build the Ollama model from `ollama/Modelfile`; `./company.sh install` for the background services.
-4. `./company.sh add ...` and `./company.sh start ...` for each company.
+4. `./company.sh site` for the chat site, then `./company.sh add ...` and `./company.sh start ...` per company.
 
 ## Copyright
 

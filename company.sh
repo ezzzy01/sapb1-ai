@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# One SAP B1 AI per company: own settings, SQL login, data, chat service and chat site. Same AI model.
+# SAP B1 AI for several companies on one chat site. People pick their company in the model menu and see only the
+# companies whose group they are in. Behind each: own settings, SQL login, data and chat service. Same AI model.
 #   ./company.sh add <id> <B1 database> "<name shown>"   create companies/<id>/ (then fill in its SQL login)
-#   ./company.sh start <id>                              check the login, start its chat service and site, first refresh
-#   ./company.sh stop <id>                               stop its chat service and site (data and chats are kept)
-#   ./company.sh list                                    companies, databases and web addresses
+#   ./company.sh start <id>                              check the login, start its chat service, put it on the site
+#   ./company.sh stop <id>                               take it off the site and stop its chat service (data kept)
+#   ./company.sh list                                    companies, databases, and whether they are on the site
+#   ./company.sh site                                    start the chat site and refresh its company list
 #   ./company.sh install                                 install the background services (after a git pull)
 #   ./company.sh run-all refresh|briefing                used by the nightly / morning timers: one company at a time
 set -euo pipefail
@@ -17,7 +19,8 @@ env_of() { echo "$COMPANIES/$1/company.env"; }
 get() { grep -E "^$2=" "$(env_of "$1")" | tail -1 | cut -d= -f2-; }
 ids() { for f in "$COMPANIES"/*/company.env; do [[ -e $f ]] && basename "$(dirname "$f")"; done; }
 need() { [[ -f $(env_of "$1") ]] || die "unknown company '$1' (see ./company.sh list)"; }
-compose() { docker compose -f "$ROOT/docker-compose.yml" --env-file "$(env_of "$1")" "${@:2}"; }
+started() { for id in $(ids); do systemctl --user is-enabled --quiet "sapb1-ai-agent@$id" && echo "$id"; done; return 0; }
+sync_site() { (cd "$ROOT" && uv run --frozen python -m sapb1_ai.webui register $(started)); }
 
 next_port() {  # one above the highest port any company uses, starting at $2
   local max=$(( $2 - 1 )) p
@@ -44,10 +47,9 @@ SAPB1_SQL_PORT=${port:-1433}
 SAPB1_SQL_USER=ai_$(echo "$id" | tr - _)
 SAPB1_SQL_PASSWORD=
 
-WEBUI_NAME=SAP B1 AI - $name
-WEBUI_PORT=$(next_port WEBUI_PORT 3100)
-WEBUI_PROJECT=sapb1-ai-$id
-WEBUI_CONTAINER=sapb1-ai-$id-webui
+# Name in the chat site's company menu; also the name of the group whose members may use it
+COMPANY_NAME=$name
+AGENT_MODEL_ID=sapb1-ai-$id
 AGENT_PORT=$(next_port AGENT_PORT 8100)
 AGENT_API_KEY=$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')
 
@@ -67,25 +69,32 @@ cmd_start() {
   (cd "$ROOT" && SAPB1_COMPANY=$id uv run --frozen sapb1-check)
   systemctl --user daemon-reload
   systemctl --user enable --now "sapb1-ai-agent@$id"
-  compose "$id" up -d
+  sync_site
   if [[ ! -f $ROOT/data/$(get "$id" SAPB1_DB)/sync_meta.json ]]; then
     echo "== First data refresh running in the background (see: journalctl --user -fu sapb1-ai-refresh@$id)"
     systemctl --user start --no-block "sapb1-ai-refresh@$id"
   fi
-  echo "Started. Open http://$(hostname):$(get "$id" WEBUI_PORT) - the first person to sign up there becomes its admin."
+  echo "Started. On http://$(uname -n):3100, add people to the group \"$(get "$id" COMPANY_NAME)\" (Admin Panel > Users > Groups)."
+  echo "Only that group (and admins) see this company in the menu."
 }
 
 cmd_stop() {
   local id=${1:-}; need "$id"
   systemctl --user disable --now "sapb1-ai-agent@$id"
-  compose "$id" stop
+  sync_site
 }
 
 cmd_list() {
-  printf '%-14s %-18s %-7s %-7s %s\n' COMPANY DATABASE SITE CHAT NAME
+  printf '%-12s %-14s %-6s %-9s %s\n' COMPANY DATABASE CHAT ON-SITE "NAME (= group)"
   for id in $(ids); do
-    printf '%-14s %-18s %-7s %-7s %s\n' "$id" "$(get "$id" SAPB1_DB)" ":$(get "$id" WEBUI_PORT)" ":$(get "$id" AGENT_PORT)" "$(get "$id" WEBUI_NAME)"
+    local on=no; systemctl --user is-enabled --quiet "sapb1-ai-agent@$id" && on=yes
+    printf '%-12s %-14s %-6s %-9s %s\n' "$id" "$(get "$id" SAPB1_DB)" ":$(get "$id" AGENT_PORT)" "$on" "$(get "$id" COMPANY_NAME)"
   done
+}
+
+cmd_site() {
+  docker compose -f "$ROOT/docker-compose.yml" up -d
+  sync_site
 }
 
 cmd_install() {
@@ -109,7 +118,8 @@ case ${1:-} in
   start) cmd_start "${@:2}" ;;
   stop) cmd_stop "${@:2}" ;;
   list) cmd_list ;;
+  site) cmd_site ;;
   install) cmd_install ;;
   run-all) cmd_run_all "${@:2}" ;;
-  *) sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+  *) sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac

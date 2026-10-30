@@ -1,6 +1,7 @@
 """Which company this process serves, and where its settings and data live.
 
-Each company is fully separate: its own settings file, SQL login, nightly data, chat service and chat site.
+Each company is separate: its own settings file, SQL login, nightly data and chat service. They share one chat site,
+where the model menu is the company selector and each person sees only the companies their group allows.
   SAPB1_COMPANY=<id>  ->  settings from companies/<id>/company.env only (the shared .env is NOT read, so no
                           login, key or push channel can fall through from another company);
                           lists (critical_items.csv, market_watch.csv) from companies/<id>/.
@@ -15,7 +16,8 @@ from dotenv import dotenv_values, load_dotenv
 
 ROOT = Path(__file__).resolve().parents[2]
 COMPANY = os.getenv("SAPB1_COMPANY", "").strip()
-REQUIRED = ("SAPB1_DB", "SAPB1_SQL_HOST", "SAPB1_SQL_USER", "SAPB1_SQL_PASSWORD", "AGENT_API_KEY", "AGENT_PORT")
+REQUIRED = ("COMPANY_NAME", "SAPB1_DB", "SAPB1_SQL_HOST", "SAPB1_SQL_USER", "SAPB1_SQL_PASSWORD",
+            "AGENT_API_KEY", "AGENT_PORT", "AGENT_MODEL_ID")
 
 if COMPANY:
     if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", COMPANY):

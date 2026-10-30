@@ -22,8 +22,9 @@ from .tools import TOOL_SCHEMAS, call_tool
 
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
 BASE_MODEL = os.getenv("AGENT_BASE_MODEL", "sapb1-stock")
-MODEL_ID = "sapb1-stock-assistant"  # kept: existing chats and the default model point to this id
-MODEL_NAME = "SAP B1 AI"
+# One entry per company in the chat site's model menu (the company selector); see company.env.
+MODEL_ID = os.getenv("AGENT_MODEL_ID", "sapb1-stock-assistant")
+MODEL_NAME = os.getenv("COMPANY_NAME", "SAP B1 AI")
 API_KEY = os.getenv("AGENT_API_KEY", "")
 MAX_TOOL_ROUNDS = 6
 # Caps per model step so a runaway generation cannot block the GPU queue.
