@@ -45,7 +45,7 @@ def message(alerts: dict) -> tuple[str, str]:
         lines.append(f"{icon} {a['ItemCode']} ({a['WhsCode']}) {a['ItemName']}: {a['action']}")
     more = len(alerts["items"]) - MAX_LISTED
     if more > 0:
-        lines.append(f"...and {more} more. Ask the SAP B1 Stock Assistant for the full list.")
+        lines.append(f"...and {more} more. Ask SAP B1 AI for the full list.")
     return title, "\n".join(lines)
 
 

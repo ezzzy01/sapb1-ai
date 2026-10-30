@@ -1,4 +1,4 @@
-"""OpenAI-compatible chat endpoint that gives the sapb1-stock model the B1 tools.
+"""OpenAI-compatible chat endpoint that gives the sapb1-stock model the B1 tools (shown as "SAP B1 AI").
 
 Open WebUI (or any OpenAI client) talks to this server; it runs the tool-calling loop
 against Ollama and streams the final answer back.
@@ -7,6 +7,7 @@ against Ollama and streams the final answer back.
 
 import asyncio
 import json
+import logging
 import os
 import re
 import time
@@ -21,7 +22,8 @@ from .tools import TOOL_SCHEMAS, call_tool
 
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
 BASE_MODEL = os.getenv("AGENT_BASE_MODEL", "sapb1-stock")
-MODEL_ID = "sapb1-stock-assistant"
+MODEL_ID = "sapb1-stock-assistant"  # kept: existing chats and the default model point to this id
+MODEL_NAME = "SAP B1 AI"
 API_KEY = os.getenv("AGENT_API_KEY", "")
 MAX_TOOL_ROUNDS = 6
 # Caps per model step so a runaway generation cannot block the GPU queue.
@@ -32,9 +34,23 @@ STEP_TIMEOUT_S = 300
 _modelfile = (Path(__file__).resolve().parents[2] / "ollama" / "Modelfile").read_text()
 SYSTEM_PROMPT = re.search(r'SYSTEM """(.*?)"""', _modelfile, re.S).group(1).strip() + """
 
-Your users include managers and the CEO, who may never open SAP. For them: lead with the business impact in money and
-risk, in plain language, use item names (not only codes), and end with the decision or action needed.
-For "how is the business / what should I know" questions use executive_summary or daily_briefing.
+You also answer finance, cash, margin and controls questions, not only stock.
+
+Your users are finance people, managers and the CEO. Most have never opened SAP and don't want to know how it works;
+they want the result. So:
+- Start with the answer in one or two sentences: the number, the name, the yes/no. Then a short table if there is a list.
+  Then, if something must be done, one line starting with "**Next step:**".
+- Plain business words only. Never show tool names, table or field names (OnHand, IsCommited, OCRD, NumAtCard...),
+  SQL, JSON or check codes. Say "possible duplicate supplier invoice", not "DUPLICATE AP" (each check has a "meaning"),
+  "could stop production", not "LINE STOP RISK", "stock on hand", "ordered from suppliers", "warehouse 01".
+- Use names (customer, supplier, item) before codes; give a document number only so they can find it in SAP.
+- Money with the currency and thousands separators, rounded to whole units; percentages to one decimal.
+- No method talk (forecast models, z-scores, medians) unless they ask how it was worked out.
+- If a word they use is ambiguous (e.g. "this month", "cash"), pick the common meaning, say which in a few words, and answer.
+For "how is the business / what should I know" questions use executive_summary or daily_briefing. For cash, who owes us,
+paying suppliers, margins and lost customers use finance_analysis; for overpaying, duplicate invoices, pricing errors,
+controls or fraud use transaction_anomalies. Its money_lost is purchases paid above the usual price plus sales made below
+the usual price; a purchase cheaper than usual saves money (list it only as a possible keying error, never as a loss).
 
 You can use the live internet: web_search, read_web_page, fx_rates, and market_watch (the nightly automatic scan).
 Use them when a question depends on the market, prices, suppliers' situation or current events, and combine what you
@@ -56,7 +72,8 @@ You have tools that read the company's B1 data. Use them for every question abou
   orders and the action.
 - Answer from tool results only. If a tool returns an error, say so plainly."""
 
-app = FastAPI(title="SAP B1 Stock Assistant")
+app = FastAPI(title=MODEL_NAME)
+log = logging.getLogger("uvicorn.error")
 
 
 def _check_key(authorization: str | None) -> None:
@@ -68,10 +85,14 @@ def _check_key(authorization: str | None) -> None:
 def models(authorization: str | None = Header(default=None)):
     _check_key(authorization)
     return {"object": "list", "data": [{"id": MODEL_ID, "object": "model", "created": 0, "owned_by": "sapb1-ai",
-                                        "name": "SAP B1 Stock Assistant"}]}
+                                        "name": MODEL_NAME}]}
 
 
 CHART_WORDS = re.compile(r"\b(chart|charts|graph|graphs|plot|plots|visuali[sz]e|visual|diagram|graf|carta|rajah)\b", re.I)
+
+
+FINANCE_WORDS = re.compile(r"\b(cash|invoices?|pay|paid|payments?|owes?|owed|debts?|receivables?|payables?|margins?|profit|"
+                           r"revenue|journals?|bank|credit notes?|overcharg\w*|duplicates?|fraud|budget|expenses?|bayar|hutang)\b", re.I)
 
 
 def _wants_chart(messages: list[dict]) -> bool:
@@ -114,9 +135,28 @@ def _prepare(messages: list[dict], use_tools: bool) -> list[dict]:
     return out
 
 
+LOOKUP_NOTES = {
+    "stock_summary": "Checking the stock overview", "critical_alerts": "Checking what could stop operations",
+    "reorder_report": "Checking what needs ordering", "search_items": "Finding the item", "item_details": "Looking up the item",
+    "sales_history": "Looking at past sales", "run_sql": "Looking it up in SAP", "market_watch": "Reading the market watch",
+    "transaction_anomalies": "Checking transactions for red flags", "finance_analysis": "Checking cash, payments and margins",
+    "daily_briefing": "Reading today's briefing", "executive_summary": "Checking the business overview",
+    "web_search": "Searching the internet", "read_web_page": "Reading a web page", "fx_rates": "Checking exchange rates",
+}
+
+
+def _lookup_note(name: str) -> str:
+    note = LOOKUP_NOTES.get(name) or ("Drawing the chart" if name.endswith("_chart") else "Looking it up")
+    return f"\n\n> 🔎 *{note}…*\n\n"
+
+
 def _warning_banner(messages: list[dict]) -> str:
     """Fixed warning shown at the start of every conversation while items may stop operations."""
     if sum(m.get("role") == "user" for m in messages) != 1:
+        return ""
+    # Finance questions: the login pop-up already showed the stock warning; don't put it in front of their answer.
+    first = next(m for m in messages if m.get("role") == "user").get("content")
+    if isinstance(first, str) and FINANCE_WORDS.search(first):
         return ""
     alerts = json.loads(call_tool("critical_alerts", {"limit": 3}))
     counts = alerts.get("counts") or {}
@@ -129,7 +169,7 @@ def _warning_banner(messages: list[dict]) -> str:
         when = "now" if days is not None and days <= 0 else (f"on {a['runout_date']}" if a.get("runout_date") else "within lead time")
         icon = "🛑" if a["status"] == "LINE STOP RISK" else "⚠️"
         blocks = f", blocks {a['production_orders_at_risk']}" if a.get("production_orders_at_risk") else ""
-        lines.append(f"> {icon} `{a['ItemCode']}` {a['ItemName']} (whs {a['WhsCode']}): runs out {when}{blocks}")
+        lines.append(f"> {icon} **{a['ItemName']}** (warehouse {a['WhsCode']}): runs out {when}{blocks}")
     lines.append("> *Ask \"show all critical alerts\" for the full list.*")
     return "\n".join(lines) + "\n\n"
 
@@ -174,8 +214,7 @@ async def _run(messages: list[dict], use_tools: bool):
                 args = fn.get("arguments") or {}
                 if isinstance(args, str):
                     args = json.loads(args or "{}")
-                shown = ", ".join(f"{k}={v}" for k, v in args.items())
-                yield f"\n\n> 🔎 *Looking up `{fn['name']}`{' (' + shown + ')' if shown else ''}*\n\n"
+                yield _lookup_note(fn["name"])
                 if fn["name"].endswith("_chart") and not _wants_chart(messages):
                     msgs.append({"role": "tool", "content": json.dumps({"error": "Charts are only shown when the user asks for one."}),
                                  "tool_name": fn["name"]})
@@ -211,8 +250,10 @@ async def chat(req: dict, authorization: str | None = Header(default=None)):
             try:
                 async for text in _run(messages, use_tools):
                     yield _chunk(cid, {"content": text})
-            except Exception as e:
-                yield _chunk(cid, {"content": f"\n\n**Error:** {type(e).__name__}: {e}"})
+            except Exception:
+                log.exception("Chat request failed")
+                yield _chunk(cid, {"content": "\n\n**Sorry, something went wrong while getting this answer.** "
+                                              "Please try again; if it keeps happening, tell IT the time you asked."})
             yield _chunk(cid, {}, "stop")
             yield "data: [DONE]\n\n"
         return StreamingResponse(events(), media_type="text/event-stream")

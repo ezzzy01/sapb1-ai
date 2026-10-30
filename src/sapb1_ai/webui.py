@@ -50,28 +50,28 @@ def banner(alerts: dict) -> list[dict]:
 
 
 def suggestions(alerts: dict) -> list[dict]:
-    out = []
+    """Result-first questions in everyday words: finance and management first, then today's stock risk."""
+    out = [
+        {"title": ["How is the business doing?", "What needs a decision today"],
+         "content": "How is the business doing and what needs a decision today? Keep it short."},
+        {"title": ["Cash outlook", "Will we have enough cash?"],
+         "content": "Will we have enough cash over the next 13 weeks? Show the lowest point and what drives it."},
+        {"title": ["Who owes us money?", "Overdue customers"],
+         "content": "Who owes us money? Show overdue customer invoices, biggest amounts first, and who is likely to pay late."},
+        {"title": ["Invoices to check", "Duplicates, overcharges, red flags"],
+         "content": "Which recent invoices or payments should finance check? Show possible duplicates, overcharges and other red flags, with the money involved."},
+        {"title": ["Margins", "Which customers and items earn the least?"],
+         "content": "How are our margins? Show the customers and items with the lowest margin and whether it is getting better or worse."},
+        {"title": ["Today's morning briefing", "Risks, money, sales, market"],
+         "content": "Show me today's morning briefing."},
+    ]
     items = alerts.get("items", [])
     if items:
         top = items[0]
         out.append({"title": [f"Why is {top['ItemName']}", "at risk and what do we do?"],
-                    "content": f"Why is {top['ItemName']} ({top['ItemCode']}) at {top['status'].lower()}, what does it block, and what should we do today?"})
-        out.append({"title": ["Show all critical alerts", "and production at risk"],
-                    "content": "Show all critical alerts: what could stop production or operations, run-out dates, blocked production orders and actions."})
-    out += [
-        {"title": ["How is the business doing?", "Decisions needed today"],
-         "content": "I'm the CEO. How is the business doing and what do I need to decide today? Keep it short."},
-        {"title": ["Today's morning briefing", "Risks, money, sales, market"],
-         "content": "Show me today's morning briefing."},
-        {"title": ["Market check", "Prices and supply news that affect us"],
-         "content": "Check the internet: which market price or supply changes affect our critical items? Give sources."},
-        {"title": ["What should we order", "this week, and why?"],
-         "content": "What should we order this week? Show item, warehouse, quantity, value and why."},
-        {"title": ["Cash check", "Who owes us money?"],
-         "content": "Who owes us money? Show overdue customer invoices and the biggest amounts."},
-        {"title": ["Supplier check", "Who delivers late?"],
-         "content": "Which suppliers deliver late, and do any of them supply our critical items?"},
-    ]
+                    "content": f"Why is {top['ItemName']} ({top['ItemCode']}) at risk of running out, what does it affect, and what should we do today?"})
+    out.append({"title": ["What should we order", "this week, and why?"],
+                "content": "What should we order this week? Show item, quantity, value and why."})
     return out[:8]
 
 

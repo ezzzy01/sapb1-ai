@@ -1,4 +1,4 @@
-"""Tools the stock assistant can call. All read-only.
+"""Tools the SAP B1 AI chat assistant can call. All read-only.
 
 Report-based tools read the files written by sync.py / forecast.py; item_details and
 run_sql also query B1 live through the read-only ai_reader login.
@@ -10,6 +10,7 @@ from datetime import datetime
 
 import pandas as pd
 
+from .anomalies import TYPE_NAMES
 from .charts import custom_chart, inventory_status_chart, sales_trend_chart, stock_projection_chart
 from .db import connect, query
 from .executive import executive_summary
@@ -161,7 +162,7 @@ def transaction_anomalies(kind: str = "", limit: int = 20) -> dict:
     limit = max(1, min(int(limit), MAX_ROWS))
     paid = pd.Series([a["paid"] for a in items], dtype=object).value_counts().to_dict()
     return {"generated_at": an["generated_at"], "currency": an["currency"], "documents_since": an["documents_since"],
-            "by_type": an["by_type"],
+            "by_type": [t | {"meaning": TYPE_NAMES.get(t["type"], t["type"])} for t in an["by_type"]],
             "total_money_lost": round(sum(t["money_lost"] for t in an["by_type"]), 2),
             "total_amount_to_review": round(sum(t.get("amount_to_review", 0) for t in an["by_type"]), 2), "rows_total": len(items), "rows_by_payment_status": paid, "rows": items[:limit]}
 
