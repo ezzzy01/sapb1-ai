@@ -102,7 +102,7 @@ def item_details(item_code: str) -> dict:
     return {
         "item": _records(item.drop(columns=["validFor", "frozenFor"]))[0],
         "live_stock_from_b1": _records(live),
-        "report_lines": _records(rep[rep.ItemCode == code][REPORT_COLS + ["safety_stock", "order_up_to", "last_sale"]]),
+        "report_lines": _records(rep[rep.ItemCode == code][REPORT_COLS + ["lead_days_std", "safety_stock", "order_up_to", "last_sale"]]),
         "forecast_by_warehouse": _records(fc_next.reset_index()),
         "forecast_pattern": fc.pattern.iloc[0] if not fc.empty else "no recent demand",
     }
@@ -162,7 +162,33 @@ def transaction_anomalies(kind: str = "", limit: int = 20) -> dict:
     paid = pd.Series([a["paid"] for a in items], dtype=object).value_counts().to_dict()
     return {"generated_at": an["generated_at"], "currency": an["currency"], "documents_since": an["documents_since"],
             "by_type": an["by_type"],
-            "total_money_lost": round(sum(t["money_lost"] for t in an["by_type"]), 2), "rows_total": len(items), "rows_by_payment_status": paid, "rows": items[:limit]}
+            "total_money_lost": round(sum(t["money_lost"] for t in an["by_type"]), 2),
+            "total_amount_to_review": round(sum(t.get("amount_to_review", 0) for t in an["by_type"]), 2), "rows_total": len(items), "rows_by_payment_status": paid, "rows": items[:limit]}
+
+
+FINANCE_TOPICS = ["cash_forecast", "late_payers", "supplier_payments", "margins", "churn", "cross_sell"]
+
+
+def finance_analysis(topic: str = "") -> dict:
+    path = DATA_DIR / "finance.json"
+    if not path.exists():
+        return {"note": "Finance analysis has not run yet."}
+    f = json.loads(path.read_text())
+    head = {"generated_at": f["generated_at"], "currency": f["currency"]}
+    if topic in FINANCE_TOPICS:
+        return head | {topic: f[topic]}
+    # Overview: the headline of each topic; ask again with a topic for the details.
+    c, lp, m = f["cash_forecast"], f["late_payers"], f["margins"]
+    return head | {
+        "cash_forecast": {k: v for k, v in c.items() if k != "weekly"},
+        "late_payers": {"company_avg_days_paid_after_due": lp["company_avg_days_paid_after_due"],
+                        "open_invoices_likely_late": {k: lp["open_invoices_likely_late"][k] for k in ("count", "value")}},
+        "supplier_payments": {"company_avg_days_paid_after_due": f["supplier_payments"]["company_avg_days_paid_after_due"]},
+        "margins": {k: m.get(k) for k in ("last_12_months", "margin_pct_last_90_days", "margin_pct_previous_275_days")},
+        "churn": {k: f["churn"].get(k) for k in ("count", "monthly_revenue_at_risk")},
+        "cross_sell_pairs": len(f["cross_sell"]["pairs"]),
+        "topics_for_details": FINANCE_TOPICS,
+    }
 
 
 def daily_briefing() -> dict:
@@ -190,9 +216,12 @@ TOOLS = {
     "executive_summary": (executive_summary, "CEO view of the whole business in money and risk: operational risk and open customer orders affected, stock value / excess / dead stock, sales trend and top customers, order book, unpaid and overdue customer invoices, supplier on-time delivery. Use for any management or 'how is the business' question.", {}),
     "daily_briefing": (daily_briefing, "Today's morning briefing for management (risks, money, sales, market), as generated at 7 AM.", {}),
     "market_watch": (market_watch, "Latest automatic internet market watch: news per product category the company depends on, exchange rates, and the assessment of what it means for the company.", {}),
-    "transaction_anomalies": (transaction_anomalies, "Nightly checks of recent invoices, biggest money impact first: unusual purchase prices (PRICE AP), unusual sales prices (PRICE AR), sales below cost (BELOW COST) and possible duplicate supplier invoices (DUPLICATE AP), each with the reason and whether the invoice is already paid (paid field). Use for money leakage, overpaying, pricing errors or fraud questions.", {
-        "kind": {"type": "string", "description": "Optional: PRICE AP, PRICE AR, BELOW COST or DUPLICATE AP"},
+    "transaction_anomalies": (transaction_anomalies, "Nightly red-flag checks of recent transactions, high severity first: PRICE AP, PRICE AR, BELOW COST, DUPLICATE AP, 3-WAY QTY (billed more than received), 3-WAY PRICE (above PO price), NO PO, BANK CHANGE (supplier bank details changed), CREDIT SPIKE, JOURNAL (suspicious manual journal). Each row has the reason, paid status, money lost (impact) or amount at stake. Use for money leakage, overpaying, pricing errors, controls or fraud questions.", {
+        "kind": {"type": "string", "description": "Optional type filter, e.g. DUPLICATE AP or BANK CHANGE"},
         "limit": {"type": "integer", "description": "Max rows, default 20"},
+    }),
+    "finance_analysis": (finance_analysis, "Money outlook from B1: 13-week cash forecast, customers likely to pay late, how early/late we pay suppliers, gross margins by customer/item/salesperson with trend, customers who stopped ordering (churn) and items often bought together (cross-sell). No topic = overview.", {
+        "topic": {"type": "string", "description": "Optional: cash_forecast, late_payers, supplier_payments, margins, churn or cross_sell"},
     }),
     "web_search": (web_search, "Search the internet (live). Use for current market prices, supply disruptions, supplier or industry news, regulations, or anything not in B1. news=true for news; recent_days limits age.", {
         "query": {"type": "string", "description": "Search words"},

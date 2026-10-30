@@ -49,9 +49,29 @@ def build() -> str:
     an_path = DATA_DIR / "anomalies.json"
     if an_path.exists() and (found := json.loads(an_path.read_text())["by_type"]):
         names = {"DUPLICATE AP": "possible duplicate supplier invoices", "BELOW COST": "sales below cost",
-                 "PRICE AP": "unusual purchase prices", "PRICE AR": "unusual sales prices"}
-        facts.append("- Transaction checks: " + "; ".join(f"{t['count']} {names.get(t['type'], t['type'])} ({_m(cur, t['money_lost'])})"
+                 "PRICE AP": "unusual purchase prices", "PRICE AR": "unusual sales prices",
+                 "3-WAY QTY": "supplier invoices billing more than received", "3-WAY PRICE": "supplier invoices above PO price",
+                 "NO PO": "supplier invoices without a PO", "BANK CHANGE": "supplier bank detail changes",
+                 "CREDIT SPIKE": "credit note spikes", "JOURNAL": "suspicious manual journals"}
+
+        def money(t):
+            return _m(cur, t["money_lost"]) + " lost" if t["money_lost"] else _m(cur, t.get("amount_to_review", 0)) + " to review"
+        facts.append("- Transaction checks: " + "; ".join(f"{t['count']} {names.get(t['type'], t['type'])} ({money(t)})"
                                                            for t in found) + ".")
+    fin_path = DATA_DIR / "finance.json"
+    if fin_path.exists():
+        fin = json.loads(fin_path.read_text())
+        c, lp, ch = fin["cash_forecast"], fin["late_payers"]["open_invoices_likely_late"], fin["churn"]
+        facts.append(f"- Cash: {_m(cur, c['cash_today'])} today, {_m(cur, c['cash_in_13_weeks'])} in 13 weeks, lowest "
+                     f"{_m(cur, c['lowest_balance'])} (week ending {c['lowest_week_ending']})"
+                     + (f"; {c['weeks_below_zero']} week(s) below zero" if c["weeks_below_zero"] else "") + ".")
+        if lp["count"]:
+            facts.append(f"- {lp['count']} open customer invoice(s) likely to be paid late ({_m(cur, lp['value'])}).")
+        mg = fin["margins"]
+        if mg.get("margin_pct_last_90_days") is not None:
+            facts.append(f"- Gross margin {mg['margin_pct_last_90_days']}% last 90 days vs {mg['margin_pct_previous_275_days']}% before.")
+        if ch.get("count"):
+            facts.append(f"- {ch['count']} regular customer(s) stopped ordering ({_m(cur, ch['monthly_revenue_at_risk'])}/month at risk).")
 
     if sales:
         def chg(p):

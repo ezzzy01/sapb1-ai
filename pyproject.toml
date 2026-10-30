@@ -22,6 +22,7 @@ sapb1-check = "sapb1_ai.check:main"
 sapb1-sync = "sapb1_ai.sync:main"
 sapb1-forecast = "sapb1_ai.forecast:main"
 sapb1-anomalies = "sapb1_ai.anomalies:main"
+sapb1-finance = "sapb1_ai.finance:main"
 
 [build-system]
 requires = ["uv_build>=0.13.6,<0.14.0"]

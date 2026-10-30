@@ -10,7 +10,8 @@ Method:
   - Each series is classified by ADI / CV² (Syntetos-Boylan): smooth and erratic
     series use AutoETS, intermittent and lumpy series use Croston SBA.
   - Service level comes from ABC class on the last 52 weeks of value; critical items get 99%.
-  - Safety stock = z * sigma(weekly demand) * sqrt(lead time + review period).
+  - Safety stock = z * sqrt((lead time + review period) * sigma(weekly demand)^2 + (weekly forecast * sigma(lead time))^2),
+    lead times in weeks; sigma(lead time) comes from actual receipts (3+ needed), so unreliable suppliers get more buffer.
   - Time-phased projection from today: on hand + open POs + released production output
     - max(forecast, dated open sales orders + production component needs) per week.
     The first week it goes negative is the run-out date; if that is before a normal order
@@ -94,6 +95,14 @@ def lead_time_days(lead: pd.DataFrame, items: pd.DataFrame) -> pd.Series:
     observed = observed[observed["count"] >= 2]["median"]
     master = items.set_index("ItemCode").LeadTime.where(lambda x: x > 0)
     return observed.combine_first(master).reindex(items.ItemCode).fillna(DEFAULT_LEAD_DAYS)
+
+
+def lead_time_std_days(lead: pd.DataFrame) -> pd.Series:
+    """Robust spread of actual supplier lead times per item (IQR / 1.349, so one freak delivery does not dominate);
+    0 when fewer than 3 receipts."""
+    g = lead[lead.LeadDays >= 0].groupby("ItemCode").LeadDays
+    spread = (g.quantile(0.75) - g.quantile(0.25)) / 1.349
+    return spread.where(g.size() >= 3).fillna(0)
 
 
 def critical_items(sales: pd.DataFrame, needs: pd.DataFrame, supply: pd.DataFrame, boms: pd.DataFrame,
@@ -205,12 +214,13 @@ def main() -> None:
     rep["critical"] = rep.critical_reason != ""
     rep["abc"] = rep.ItemCode.map(abc_classes(demand_hist, as_of)).fillna("C")
     rep["lead_days"] = rep.ItemCode.map(lead_time_days(lead, items))
+    rep["lead_days_std"] = rep.ItemCode.map(lead_time_std_days(lead)).fillna(0)
     rep["fc_weekly"] = rep.fc_weekly.fillna(0)
     rep["std52"] = rep.std52.fillna(0)
 
     lt_w = rep.lead_days / 7
     z = np.where(rep.critical, CRITICAL_Z, rep.abc.map(SERVICE_Z))
-    rep["safety_stock"] = np.ceil(z * rep.std52 * np.sqrt(lt_w + REVIEW_WEEKS))
+    rep["safety_stock"] = np.ceil(z * np.sqrt((lt_w + REVIEW_WEEKS) * rep.std52 ** 2 + (rep.fc_weekly * rep.lead_days_std / 7) ** 2))
     rep["reorder_point"] = np.ceil(rep.fc_weekly * lt_w + rep.safety_stock)
     rep["order_up_to"] = np.ceil(rep.fc_weekly * (lt_w + REVIEW_WEEKS) + rep.safety_stock)
     rep["available"] = rep.OnHand - rep.IsCommited
@@ -312,7 +322,7 @@ def main() -> None:
 
     cols = [
         "status", "critical", "ItemCode", "ItemName", "WhsCode", "ItmsGrpNam", "abc", "pattern", "PrefVendor",
-        "OnHand", "IsCommited", "OnOrder", "available", "position", "fc_weekly", "weeks_cover", "lead_days",
+        "OnHand", "IsCommited", "OnOrder", "available", "position", "fc_weekly", "weeks_cover", "lead_days", "lead_days_std",
         "runout_date", "days_to_runout", "shortfall_in_lead_time", "stock_at_arrival", "transfer_from", "production_orders_at_risk",
         "safety_stock", "reorder_point", "order_up_to", "suggested_qty", "unit_cost", "suggested_value",
         "last_sale", "critical_reason", "action",
