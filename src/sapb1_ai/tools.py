@@ -122,12 +122,18 @@ def sales_history(item_code: str, weeks: int = 26) -> dict:
 
 
 _FORBIDDEN = re.compile(r"\b(insert|update|delete|merge|drop|alter|create|truncate|exec|execute|grant|revoke|into|openrowset|opendatasource|xp_\w+|sp_\w+)\b", re.I)
+# Only this company's database: no Other.dbo.Table / Other..Table names, linked servers or database lists.
+# (The real barrier is a SQL login per company that can open only its own database; this stops the attempt early.)
+_NAME = r'(?:\[[^\]]*\]|"[^"]*"|\w+)'
+_OTHER_DB = re.compile(rf"{_NAME}\s*\.\s*(?:{_NAME})?\s*\.\s*{_NAME}|\bopenquery\b|\bsys\s*\.\s*(?:databases|servers)\b", re.I)
 
 
 def run_sql(sql: str) -> dict:
     stmt = sql.strip().rstrip(";").strip()
     if not re.match(r"^(select|with)\b", stmt, re.I) or ";" in stmt or _FORBIDDEN.search(stmt):
         return {"error": "Only a single read-only SELECT statement is allowed."}
+    if _OTHER_DB.search(re.sub(r"'(?:[^']|'')*'", "''", stmt)):
+        return {"error": "Only this company's own database can be queried."}
     conn = connect()
     try:
         cur = conn.cursor()

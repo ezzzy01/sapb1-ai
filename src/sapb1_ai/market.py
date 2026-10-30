@@ -9,15 +9,15 @@ Writes market_watch.json, used by the assistant and the morning briefing.
 import json
 import os
 from datetime import datetime
-from pathlib import Path
 
 import pandas as pd
 
+from .company import config_file
 from .llm import ask
 from .sync import DATA_DIR
 from .web import fx_rates, web_search
 
-CONFIG = Path(__file__).resolve().parents[2] / "config" / "market_watch.csv"
+CONFIG = config_file("market_watch.csv")
 MAX_TOPICS = 8
 HEADLINES_PER_TOPIC = 5
 FX_BASE = os.getenv("MARKET_FX_BASE", "USD")

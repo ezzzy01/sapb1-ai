@@ -1,0 +1,7 @@
+[Unit]
+Description=SAP B1 AI: morning briefing for every company, one after another
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/sapb1-ai
+ExecStart=%h/sapb1-ai/company.sh run-all briefing

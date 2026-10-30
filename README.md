@@ -30,20 +30,42 @@ Everything runs on one PC: the analysis on the CPU overnight, a small local LLM 
 ## How it runs
 
 ```
-02:00  sync -> forecast -> alerts -> anomalies -> finance -> webui -> market     (systemd user timer)
-07:00  briefing
-any    chat: Open WebUI -> agent (:8100) -> tools over the nightly results + read-only live B1 queries
+02:00  sync -> forecast -> alerts -> anomalies -> finance -> webui -> market     (each company in turn)
+07:00  briefing                                                                  (each company in turn)
+any    chat: company's Open WebUI -> company's agent -> its nightly results + read-only live B1 queries
 ```
 
 Code is in `src/sapb1_ai/`: `sync.py` (B1 extract, incremental), `forecast.py`, `alerts.py`, `anomalies.py`,
-`finance.py`, `tools.py` + `agent.py` (chat), `briefing.py`, `market.py`.
+`finance.py`, `tools.py` + `agent.py` (chat), `briefing.py`, `market.py`, `company.py` (which company a process serves).
+
+## Several companies
+
+Each company gets its own SAP B1 AI, and nothing is shared between them except the AI model, which keeps nothing:
+
+| Per company | Where |
+|---|---|
+| Settings, SQL login, chat API key, push channels | `companies/<id>/company.env` (git-ignored) |
+| Critical items, market topics | `companies/<id>/*.csv` |
+| Nightly data | `data/<B1 database>/` |
+| Chat service | `sapb1-ai-agent@<id>` on its own port |
+| Chat site, accounts and chats | its own Open WebUI container and volume, on its own port |
+
+A process started for one company reads only that company's file, never the shared `.env`. The chat can only query its
+own database, and admins can't read users' chats. For full separation give each company a SQL login that can open only
+its own database.
+
+```
+./company.sh add <id> <B1 database> "<name shown>"   # then fill in its SQL login in companies/<id>/company.env
+./company.sh start <id>                              # checks the login, starts its chat service and site
+./company.sh list
+```
 
 ## Setup (outline)
 
-1. Create a read-only SQL login on the B1 company database (`db_datareader` only).
-2. `cp .env.example .env` and fill in the host, database, login and an API key.
-3. `uv sync`, then `uv run sapb1-check` to test the connection and `uv run sapb1-sync` for the first extract.
-4. Build the Ollama model from `ollama/Modelfile`; start Open WebUI with `docker compose up -d`.
+1. Create a read-only SQL login per B1 company database (`db_datareader` on that database only).
+2. `cp .env.example .env` and fill in the SQL host (used as the default for new companies).
+3. `uv sync`; build the Ollama model from `ollama/Modelfile`; `./company.sh install` for the background services.
+4. `./company.sh add ...` and `./company.sh start ...` for each company.
 
 ## Copyright
 

@@ -15,3 +15,6 @@ data/
 
 # Open WebUI database backups (user accounts, chats)
 backups/
+
+# Per-company settings (SQL logins, keys) and lists (item codes): private, never committed
+companies/

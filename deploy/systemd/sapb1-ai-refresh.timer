@@ -1,0 +1,9 @@
+[Unit]
+Description=Nightly SAP B1 data sync and forecast (02:00)
+
+[Timer]
+OnCalendar=*-*-* 02:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

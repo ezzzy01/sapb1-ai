@@ -24,13 +24,13 @@ Critical items (status LINE STOP RISK when they will run out):
 """
 
 import os
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
 from statsforecast import StatsForecast
 from statsforecast.models import AutoETS, CrostonSBA
 
+from .company import config_file
 from .sync import DATA_DIR
 
 HORIZON_WEEKS = 12
@@ -40,7 +40,7 @@ REVIEW_WEEKS = float(os.getenv("REVIEW_WEEKS", "1"))
 DEFAULT_LEAD_DAYS = float(os.getenv("DEFAULT_LEAD_DAYS", "14"))
 SERVICE_Z = {"A": 2.05, "B": 1.65, "C": 1.28}  # 98%, 95%, 90%
 CRITICAL_Z = 2.33  # 99%
-CRITICAL_FILE = Path(__file__).resolve().parents[2] / "config" / "critical_items.csv"
+CRITICAL_FILE = config_file("critical_items.csv")
 
 STATUS_ORDER = {"LINE STOP RISK": 0, "STOCKOUT RISK": 1, "REORDER": 2, "OVERSTOCK": 3, "DEAD STOCK": 4, "OK": 5}
 
