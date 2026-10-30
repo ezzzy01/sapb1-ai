@@ -1,0 +1,34 @@
+# SAP B1 Stock AI chat interface.
+# Separate from the personal Open WebUI (~/local-ai, port 3000): own container,
+# own data volume, own accounts and chat history. Shares only the Ollama server.
+#   Start:  docker compose up -d      Open: http://<desktop>:3100
+name: sapb1-ai
+
+services:
+  webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: sapb1-ai-webui
+    restart: unless-stopped
+    ports:
+      - "3100:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      WEBUI_NAME: "SAP B1 Stock AI"
+      OLLAMA_BASE_URL: "http://host.docker.internal:11434"
+      DEFAULT_MODELS: "sapb1-stock"
+      ENABLE_OPENAI_API: "false"
+      ENABLE_WEB_SEARCH: "false"
+      SCARF_NO_ANALYTICS: "true"
+      DO_NOT_TRACK: "true"
+      ANONYMIZED_TELEMETRY: "false"
+      # Start-page suggestions (source: webui/suggestions.json)
+      DEFAULT_PROMPT_SUGGESTIONS: '[{"title": ["What should I reorder", "this week?"], "content": "What should I reorder this week? Show item, warehouse, suggested quantity and why."}, {"title": ["Which items are at", "stockout risk?"], "content": "Which items are at stockout risk, and how many days of stock do they have left?"}, {"title": ["Show dead and", "overstocked items"], "content": "List dead stock and overstocked items with their stock value."}, {"title": ["Explain the reorder point", "for an item"], "content": "Explain how the reorder point and suggested order quantity were calculated for item "}]'
+    volumes:
+      - webui-data:/app/backend/data
+      # Fiori Horizon theme: custom.css imports webui/fiori.css; edits apply on browser refresh.
+      - ./webui/custom.css:/app/build/static/custom.css:ro
+      - ./webui:/app/backend/open_webui/static/sapb1:ro
+
+volumes:
+  webui-data:

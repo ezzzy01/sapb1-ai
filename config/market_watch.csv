@@ -1,0 +1,6 @@
+# Extra market topics the AI watches every night, for any industry (item groups of critical and
+# top-value items are watched automatically). Use generic words only - these are sent to search engines.
+# Topic,Query
+# Steel,steel prices Asia
+# Shipping,container freight rates Asia Europe
+Topic,Query

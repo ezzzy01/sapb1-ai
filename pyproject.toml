@@ -1,0 +1,28 @@
+[project]
+name = "sapb1-ai"
+version = "0.1.0"
+description = "AI forecasting and stock analytics for SAP Business One (SQL Server)"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.162.0",
+    "httpx>=0.28.1",
+    "lightgbm>=4.7.0",
+    "matplotlib>=3.11.2",
+    "mssql-python>=1.16.0",
+    "pandas>=3.1.0",
+    "pyarrow>=26.0.0",
+    "python-dotenv>=1.2.4",
+    "scikit-learn>=1.9.1",
+    "statsforecast>=2.0.3",
+    "uvicorn>=0.54.0",
+]
+
+[project.scripts]
+sapb1-check = "sapb1_ai.check:main"
+sapb1-sync = "sapb1_ai.sync:main"
+sapb1-forecast = "sapb1_ai.forecast:main"
+sapb1-anomalies = "sapb1_ai.anomalies:main"
+
+[build-system]
+requires = ["uv_build>=0.13.6,<0.14.0"]
+build-backend = "uv_build"

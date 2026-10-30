@@ -1,0 +1,6 @@
+# Items that must never run out, for any industry: packaging, machine spare parts, key ingredients,
+# labels, consumables... Production BOM components are detected automatically; list anything else here.
+# One item per line. Reason is optional and shows in warnings. Example:
+# ItemCode,Reason
+# PKG-BOX-01,Packaging for all finished goods
+ItemCode,Reason

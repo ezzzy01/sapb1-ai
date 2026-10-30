@@ -1,0 +1,252 @@
+/* SAP Fiori Horizon look for the SAP B1 Stock AI interface (Open WebUI custom.css).
+   Only mounted into the sapb1-ai container; the personal Open WebUI is unaffected.
+   Colours follow the Horizon (light) and Horizon Evening (dark) theme parameters. */
+
+@font-face { font-family: "72"; font-weight: 400; font-display: swap;
+  src: url("https://cdn.jsdelivr.net/npm/@sap-theming/theming-base-content@11.36.5/content/Base/baseLib/baseTheme/fonts/72-Regular.woff2") format("woff2"); }
+@font-face { font-family: "72"; font-weight: 600; font-display: swap;
+  src: url("https://cdn.jsdelivr.net/npm/@sap-theming/theming-base-content@11.36.5/content/Base/baseLib/baseTheme/fonts/72-Semibold.woff2") format("woff2"); }
+@font-face { font-family: "72"; font-weight: 700; font-display: swap;
+  src: url("https://cdn.jsdelivr.net/npm/@sap-theming/theming-base-content@11.36.5/content/Base/baseLib/baseTheme/fonts/72-Bold.woff2") format("woff2"); }
+@font-face { font-family: "72Mono"; font-weight: 400; font-display: swap;
+  src: url("https://cdn.jsdelivr.net/npm/@sap-theming/theming-base-content@11.36.5/content/Base/baseLib/baseTheme/fonts/72Mono-Regular.woff2") format("woff2"); }
+
+/* ---------- Theme tokens ---------- */
+:root {
+  --sap-brand: #0070f2;
+  --sap-brand-hover: #0064d9;
+  --sap-bg: #f5f6f7;
+  --sap-shell: #ffffff;
+  --sap-tile: #ffffff;
+  --sap-text: #1d2d3e;
+  --sap-label: #556b82;
+  --sap-border: #d9d9d9;
+  --sap-field-border: #556b82;
+  --sap-hover: #eaecee;
+  --sap-selected: #ebf8ff;
+  --sap-shadow: 0 0 0.125rem 0 rgba(34, 53, 72, 0.15), 0 0.125rem 0.5rem 0 rgba(34, 53, 72, 0.15);
+  --sap-shell-h: 3.25rem;
+
+  --font-sans: "72", "72full", Arial, Helvetica, sans-serif;
+  --font-primary: "72", "72full", Arial, Helvetica, sans-serif;
+  --font-secondary: "72", "72full", Arial, Helvetica, sans-serif;
+  --font-mono: "72Mono", ui-monospace, Consolas, monospace;
+
+  /* Re-map Open WebUI's neutral greys to Horizon's blue-greys. */
+  --color-gray-50: #f5f6f7;
+  --color-gray-100: #eaecee;
+  --color-gray-200: #d5dadd;
+  --color-gray-300: #bcc3ca;
+  --color-gray-400: #a9b4be;
+  --color-gray-500: #788fa6;
+  --color-gray-600: #556b82;
+  --color-gray-700: #1d2d3e;
+  --color-gray-800: #2b3540;
+  --color-gray-850: #1d232a;
+  --color-gray-900: #12171c;
+  --color-gray-950: #0b0f12;
+}
+
+.dark {
+  --sap-brand: #4db1ff;
+  --sap-brand-hover: #75c3ff;
+  --sap-bg: #12171c;
+  --sap-shell: #1d232a;
+  --sap-tile: #1d232a;
+  --sap-text: #eaecee;
+  --sap-label: #a9b4be;
+  --sap-border: #2f3c48;
+  --sap-field-border: #8396a8;
+  --sap-hover: #283440;
+  --sap-selected: #1e3a55;
+  --sap-shadow: 0 0 0.125rem 0 rgba(0, 0, 0, 0.4), 0 0.125rem 0.5rem 0 rgba(0, 0, 0, 0.4);
+}
+
+html, body { font-family: var(--font-sans); }
+body { background: var(--sap-bg); color: var(--sap-text); }
+
+/* ---------- Shell bar ---------- */
+.app::before {
+  content: "SAP B1 Stock AI";
+  position: fixed; inset: 0 0 auto 0; z-index: 40;
+  height: var(--sap-shell-h);
+  display: flex; align-items: center;
+  padding: 0 1rem 0 3.5rem;
+  background: var(--sap-shell);
+  color: var(--sap-text);
+  font: 700 1rem/1 var(--font-sans);
+  box-shadow: var(--sap-shadow);
+}
+/* Product mark left of the title. */
+.app::after {
+  content: "B1";
+  position: fixed; top: calc((var(--sap-shell-h) - 1.75rem) / 2); left: 1rem; z-index: 41;
+  width: 1.75rem; height: 1.75rem; border-radius: 0.375rem;
+  display: grid; place-items: center;
+  background: var(--sap-brand); color: #fff;
+  font: 700 0.75rem/1 var(--font-sans);
+}
+.dark .app::after { color: #12171c; }
+
+.app { padding-top: var(--sap-shell-h); }
+.app .h-screen { height: calc(100dvh - var(--sap-shell-h)); }
+.app .max-h-\[100dvh\] { max-height: calc(100dvh - var(--sap-shell-h)); }
+.app .h-\[100dvh\] { height: calc(100dvh - var(--sap-shell-h)); }
+/* The opened sidebar is position:fixed from the top of the window; start it below the shell bar
+   (like Fiori side navigation) and let it run to the bottom, so the user menu sits at the bottom edge.
+   While it slides closed Open WebUI drops the id, so the container is also matched by its classes. */
+#sidebar.fixed,
+.app div.fixed.select-none.min-h-screen {
+  top: var(--sap-shell-h) !important;
+  height: calc(100dvh - var(--sap-shell-h)) !important;
+  min-height: 0 !important;
+  max-height: calc(100dvh - var(--sap-shell-h)) !important;
+}
+
+/* ---------- Page and side navigation ---------- */
+.app > div:first-child,
+#chat-container { background: var(--sap-bg); }
+
+#sidebar {
+  background: var(--sap-shell);
+  border-right: 1px solid var(--sap-border);
+}
+#sidebar a:hover, #sidebar button:hover, #sidebar-chat-item:hover { background: var(--sap-hover); }
+#sidebar-chat-item.bg-gray-100, .dark #sidebar-chat-item.dark\:bg-gray-900 {
+  background: var(--sap-selected);
+  color: var(--sap-brand);
+  box-shadow: inset 0.1875rem 0 0 var(--sap-brand);
+}
+#sidebar-webui-name { font-weight: 700; }
+
+/* ---------- Chat input as a Fiori card ---------- */
+#message-input-container .rounded-3xl,
+#message-input-container [class*="rounded-3xl"] {
+  border-radius: 0.75rem;
+  background: var(--sap-tile);
+  border: 1px solid var(--sap-border);
+  box-shadow: var(--sap-shadow);
+}
+#message-input-container .rounded-3xl:focus-within {
+  border-color: var(--sap-brand);
+  box-shadow: var(--sap-shadow), 0 0 0 1px var(--sap-brand);
+}
+
+/* ---------- Buttons ---------- */
+/* Emphasized (primary) buttons: Open WebUI's black/white buttons become Horizon blue. */
+button.bg-black,
+.dark button.dark\:bg-white {
+  background: var(--sap-brand);
+  color: #fff;
+}
+.dark button.dark\:bg-white { color: #12171c; }
+button.bg-black:hover,
+.dark button.dark\:bg-white:hover { background: var(--sap-brand-hover); }
+button.bg-black svg, .dark button.dark\:bg-white svg { color: inherit; }
+
+/* Pill buttons become Fiori's rounded rectangles. */
+button.rounded-full:not(.size-8):not(.size-7):not(.size-6):not([class*="p-1"]):not([class*="p-1.5"]) { border-radius: 0.5rem; }
+
+/* ---------- Content ---------- */
+#chat-container .markdown-prose a, .text-blue-500, .text-blue-600 { color: var(--sap-brand); }
+#sidebar a, #sidebar button { color: var(--sap-text); }
+::selection { background: var(--sap-selected); }
+
+/* Assistant messages: Fiori text colour and line height. */
+#chat-container .markdown-prose, #chat-container .prose { color: var(--sap-text); line-height: 1.5; }
+
+/* User messages: light blue Fiori bubble so they stand out from the page background. */
+#chat-container .rounded-3xl.max-w-\[90\%\] {
+  background: var(--sap-selected);
+  border: 1px solid color-mix(in srgb, var(--sap-brand) 25%, transparent);
+  border-radius: 0.75rem;
+  color: var(--sap-text);
+}
+
+/* Tables (stock lists) styled like a Fiori responsive table. */
+#chat-container table {
+  border-collapse: separate; border-spacing: 0;
+  background: var(--sap-tile);
+  border: 1px solid var(--sap-border); border-radius: 0.75rem; overflow: hidden;
+  box-shadow: var(--sap-shadow);
+}
+#chat-container th {
+  background: var(--sap-tile); color: var(--sap-label);
+  font-weight: 400; font-size: 0.875rem; text-align: left; text-transform: none;
+  border-bottom: 1px solid var(--sap-border) !important;
+}
+#chat-container td { border-bottom: 1px solid var(--sap-border); }
+#chat-container tr:last-child td { border-bottom: 0; }
+#chat-container tbody tr:hover td { background: var(--sap-hover); }
+
+/* Modals and menus as Fiori dialogs/popovers. */
+.modal-content, [role="dialog"] > div, [role="menu"] {
+  border-radius: 0.75rem;
+  box-shadow: 0 0 0.125rem 0 rgba(34, 53, 72, 0.15), 0 1rem 2rem 0 rgba(34, 53, 72, 0.25);
+}
+
+/* Focus ring, Horizon style. */
+:focus-visible { outline: 0.125rem solid var(--sap-brand); outline-offset: 0.0625rem; }
+
+/* Login warning (published by sapb1_ai.webui): shown as a centred Fiori dialog over a dimmed page.
+   Open WebUI's banner is restyled; closing it with x hides it until the next refresh publishes a new one. */
+nav .rounded-lg.backdrop-blur-xl {
+  position: fixed !important;
+  top: 50% !important; left: 50% !important; right: auto !important;
+  transform: translate(-50%, -50%);
+  z-index: 60 !important;
+  width: min(40rem, calc(100vw - 2rem));
+  max-height: 80vh; overflow-y: auto;
+  margin: 0 !important;
+  padding: 1.25rem 1.5rem 1.25rem 1.5rem !important;
+  display: block !important;
+  opacity: 1 !important;
+  background: var(--sap-tile) !important;
+  border: 0 !important;
+  border-top: 0.375rem solid #e90b0b !important;
+  border-radius: 1rem !important;
+  color: var(--sap-text) !important;
+  /* The huge spread shadow dims everything behind the dialog. */
+  box-shadow: 0 0 0 100vmax rgba(18, 23, 28, 0.55), 0 1rem 3rem rgba(0, 0, 0, 0.35) !important;
+  backdrop-filter: none !important;
+}
+nav .rounded-lg.backdrop-blur-xl > div { display: block !important; width: 100% !important; }
+/* Badge on its own line above the message. */
+nav .rounded-lg.backdrop-blur-xl [class*="-500/20"] {
+  display: inline-block !important; margin-bottom: 0.5rem; padding: 0.125rem 0.625rem !important; border-radius: 1rem !important;
+}
+/* Message text: normal reading size, no inner scroll limit. */
+nav .rounded-lg.backdrop-blur-xl .text-xs {
+  max-height: none !important; overflow: visible !important;
+  font-size: 0.9375rem !important; line-height: 1.5; font-weight: 400 !important; color: var(--sap-text) !important;
+}
+nav .rounded-lg.backdrop-blur-xl .sapb1-h { font-size: 1.375rem; font-weight: 700; margin: 0.25rem 0 0.25rem; }
+nav .rounded-lg.backdrop-blur-xl .sapb1-whs { color: var(--sap-label); font-size: 0.8125rem; }
+nav .rounded-lg.backdrop-blur-xl .sapb1-sub { display: block; margin-left: 1.6rem; color: #aa0808; font-size: 0.8125rem; }
+nav .rounded-lg.backdrop-blur-xl .sapb1-more { color: var(--sap-label); }
+nav .rounded-lg.backdrop-blur-xl .sapb1-foot { color: var(--sap-label); font-size: 0.875rem; }
+nav .rounded-lg.backdrop-blur-xl ul { list-style: none; padding: 0; margin: 0.75rem 0; }
+nav .rounded-lg.backdrop-blur-xl li { padding: 0.375rem 0; border-bottom: 1px solid var(--sap-border); }
+nav .rounded-lg.backdrop-blur-xl li:last-child { border-bottom: 0; }
+nav .rounded-lg.backdrop-blur-xl p { margin: 0.25rem 0; }
+/* Close button top-right, larger. */
+nav .rounded-lg.backdrop-blur-xl button {
+  position: absolute !important; top: 0.75rem; right: 0.75rem;
+  width: 2rem; height: 2rem; display: grid; place-items: center; border-radius: 0.5rem;
+  color: var(--sap-label) !important;
+}
+nav .rounded-lg.backdrop-blur-xl button:hover { background: var(--sap-hover); }
+nav .rounded-lg.backdrop-blur-xl button svg { width: 1.25rem; height: 1.25rem; }
+
+/* Badge wording and accent colour follow the alert level (Open WebUI would print "ERROR"). */
+nav .rounded-lg.backdrop-blur-xl [class*="-500/20"] { font-size: 0 !important; white-space: nowrap; }
+nav .rounded-lg.backdrop-blur-xl [class*="-500/20"]::after { font-size: 0.75rem; font-weight: 700; letter-spacing: 0.04em; }
+nav .rounded-lg.backdrop-blur-xl [class*="bg-red-500/20"] { background: #ffeaf4 !important; color: #aa0808 !important; }
+nav .rounded-lg.backdrop-blur-xl [class*="bg-red-500/20"]::after { content: "CRITICAL STOCK ALERT"; }
+nav .rounded-lg.backdrop-blur-xl [class*="bg-yellow-500/20"] { background: #fff8d6 !important; color: #aa5300 !important; }
+nav .rounded-lg.backdrop-blur-xl [class*="bg-yellow-500/20"]::after { content: "STOCK ALERT"; }
+nav .rounded-lg.backdrop-blur-xl [class*="bg-green-500/20"] { background: #f5fae5 !important; color: #256f3a !important; }
+nav .rounded-lg.backdrop-blur-xl [class*="bg-green-500/20"]::after { content: "ALL CLEAR"; }
+nav .rounded-lg.backdrop-blur-xl [class*="bg-blue-500/20"]::after { content: "NOTICE"; }
+nav .rounded-lg.backdrop-blur-xl:has([class*="bg-yellow-500/20"]) { border-top-color: #dd6100 !important; }
+nav .rounded-lg.backdrop-blur-xl:has([class*="bg-green-500/20"]) { border-top-color: #30914c !important; }

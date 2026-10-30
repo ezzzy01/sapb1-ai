@@ -1,0 +1,2 @@
+/* Loads the SAP B1 Fiori theme. Theme lives in webui/fiori.css (mounted at /static/sapb1). */
+@import url("/static/sapb1/fiori.css");

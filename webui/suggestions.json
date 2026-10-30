@@ -1,0 +1,6 @@
+[
+  {"title": ["What should I reorder", "this week?"], "content": "What should I reorder this week? Show item, warehouse, suggested quantity and why."},
+  {"title": ["Which items are at", "stockout risk?"], "content": "Which items are at stockout risk, and how many days of stock do they have left?"},
+  {"title": ["Show dead and", "overstocked items"], "content": "List dead stock and overstocked items with their stock value."},
+  {"title": ["Explain the reorder point", "for an item"], "content": "Explain how the reorder point and suggested order quantity were calculated for item "}
+]
