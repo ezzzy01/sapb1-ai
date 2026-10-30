@@ -31,6 +31,8 @@ services:
       - webui-data:/app/backend/data
       # Fiori Horizon theme: custom.css imports webui/fiori.css; edits apply on browser refresh.
       - ./webui/custom.css:/app/build/static/custom.css:ro
+      # Company dropdown on the login page (replaces Open WebUI's empty loader.js; restart the site after editing).
+      - ./webui/loader.js:/app/build/static/loader.js:ro
       - ./webui:/app/backend/open_webui/static/sapb1:ro
 
 volumes:

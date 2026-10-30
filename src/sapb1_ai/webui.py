@@ -3,9 +3,10 @@
 The model menu at the top of the chat is the company selector. Each company stays separate behind it: its own chat
 service, SQL login and data. On the site:
   register  (./company.sh, site level) one connection per started company to its own chat service, one group per
-            company (with that company preselected for its members), and the company's menu entry readable only by
-            that group. Open WebUI hides the entry from
-            everyone else and refuses chats with it. The site-wide pop-up and suggestions carry no company data.
+            company (with that company preselected for its members), the company's menu entry readable only by that
+            group (Open WebUI hides it from everyone else and refuses chats with it), and the company names for the
+            Company dropdown on the login page (webui/loader.js). The site-wide pop-up and suggestions carry no
+            company data.
   publish   (nightly, per company) the company's warning line and suggested questions, shown on the start page
             while that company is selected.
 Changes are written with Open WebUI's own code inside its container, so they follow its rules and schema.
@@ -23,6 +24,7 @@ from .sync import DATA_DIR
 
 CONTAINER = os.getenv("WEBUI_CONTAINER", "sapb1-ai-webui")
 MODEL_ID = os.getenv("AGENT_MODEL_ID", "sapb1-stock-assistant")
+LOGIN_COMPANIES = ROOT / "webui" / "companies.json"  # served at /static/sapb1/companies.json
 
 # Site-wide start-page suggestions: generic, because everyone sees them whatever company they work in.
 GENERIC_SUGGESTIONS = [
@@ -179,6 +181,10 @@ def register(company_ids: list[str]) -> None:
                           "model_id": env["AGENT_MODEL_ID"], "key": env["AGENT_API_KEY"],
                           "url": f"http://host.docker.internal:{env['AGENT_PORT']}/v1"})
     result = _site({"action": "register", "companies": companies, "suggestions": GENERIC_SUGGESTIONS})
+    # Names only. The login page is public, so anyone who opens it sees them; choosing a company someone isn't
+    # allowed to use opens nothing.
+    LOGIN_COMPANIES.write_text(json.dumps(sorted(({"name": c["name"], "model": c["model_id"]} for c in companies),
+                                                 key=lambda c: c["name"].lower()), indent=1))
     print("On the chat site: " + (", ".join(result["companies"]) or "no companies"))
     if result["connections_changed"]:
         subprocess.run(["docker", "restart", CONTAINER], check=True, capture_output=True)
