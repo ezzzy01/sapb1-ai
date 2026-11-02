@@ -11,11 +11,13 @@ from datetime import datetime
 import pandas as pd
 
 from .anomalies import TYPE_NAMES
-from .charts import custom_chart, inventory_status_chart, sales_trend_chart, stock_projection_chart
+from .charts import (cash_forecast_chart, custom_chart, inventory_status_chart, receivables_chart, sales_trend_chart,
+                     stock_levels_chart, stock_projection_chart, top_chart)
 from .db import connect, query
 from .executive import executive_summary
 from .export import excel_link
 from .sales import sales_analysis
+from .numbers import label
 from .sync import DATA_DIR
 from .web import fx_rates, read_web_page, web_search
 
@@ -185,6 +187,34 @@ def transaction_anomalies(kind: str = "", limit: int = 20) -> dict:
 FINANCE_TOPICS = ["cash_forecast", "late_payers", "supplier_payments", "margins", "churn", "cross_sell"]
 
 
+def receivables(customer: str = "", limit: int = 20) -> dict:
+    """Who owes us money: unpaid customer invoices per customer (owed, overdue, oldest days late), from the last sync."""
+    ar = pd.read_parquet(DATA_DIR / "ar_open.parquet")
+    meta = json.loads((DATA_DIR / "sync_meta.json").read_text())
+    today = pd.Timestamp(meta.get("synced_at") or pd.Timestamp.today()).normalize()
+    head = {"currency": label(meta.get("currency") or ""), "as_of": str(today.date())}
+    if ar.empty:
+        return head | {"note": "No unpaid customer invoices."}
+    ar["DocDueDate"] = pd.to_datetime(ar.DocDueDate)
+    ar["days_late"] = (today - ar.DocDueDate).dt.days.clip(lower=0)
+    ar["overdue"] = ar.Balance.where(ar.days_late > 0, 0)
+    if customer:
+        c = customer.lower()
+        ar = ar[ar.CardCode.str.lower().eq(c) | ar.CardName.fillna("").str.lower().str.contains(c, regex=False)]
+        if ar.empty:
+            return head | {"error": f"No unpaid invoices for a customer matching '{customer}'."}
+    g = (ar.groupby(["CardCode", "CardName"])
+         .agg(owed=("Balance", "sum"), overdue=("overdue", "sum"), invoices=("DocNum", "size"), oldest_days_late=("days_late", "max"))
+         .reset_index().sort_values("owed", ascending=False).round(2))
+    limit = max(1, min(int(limit or 20), MAX_ROWS))
+    out = head | {"total_owed": round(float(ar.Balance.sum()), 2), "total_overdue": round(float(ar.overdue.sum()), 2),
+                  "customers_total": len(g), "customers": _records(g.head(limit))}
+    if customer:  # one customer: its invoices too
+        inv = ar.sort_values("DocDueDate")[["DocNum", "DocDate", "DocDueDate", "DocTotal", "Balance", "days_late"]]
+        out["invoices"] = _records(inv.head(limit).round(2))
+    return out
+
+
 def finance_analysis(topic: str = "") -> dict:
     path = DATA_DIR / "finance.json"
     if not path.exists():
@@ -232,7 +262,7 @@ LISTS = {
 }
 EXPORTABLE = ("sales_analysis", "reorder_report", "critical_alerts", "stock_summary", "search_items", "item_details",
               "sales_history", "transaction_anomalies", "finance_analysis", "executive_summary", "daily_briefing",
-              "market_watch", "fx_rates")
+              "market_watch", "fx_rates", "receivables")
 
 
 def _result_sheets(result: dict) -> dict[str, pd.DataFrame]:
@@ -308,21 +338,40 @@ def export_excel(title: str, tool: str = "", arguments: dict | None = None, sql:
 
 
 TOOLS = {
-    "stock_projection_chart": (stock_projection_chart, "CHART: week-by-week projected stock for one item with incoming deliveries, safety stock, reorder point, lead time and run-out date. Use when asked to show/graph/visualise an item's stock or why it runs out.", {
+    # Charts: pick the one that answers the question. Each draws from real B1 data; never draw an unrelated one.
+    "sales_trend_chart": (sales_trend_chart, "CHART over time: net sales, gross PROFIT or gross MARGIN % per month, for the company or one item. Use for 'graph our sales/revenue/profit/margin', 'how are sales trending', 'monthly sales'.", {
+        "measure": {"type": "string", "description": "sales (default), profit or margin"},
+        "months": {"type": "integer", "description": "Number of months, default 12 (3-36)"},
+        "item_code": {"type": "string", "description": "Optional exact item code"},
+    }),
+    "top_chart": (top_chart, "CHART ranking: the biggest customers, items, item groups or salespeople by net sales or gross profit, with each one's share. Use for 'top/best customers', 'best-selling items', 'who buys most', 'sales by salesperson', 'profit by customer/item'.", {
+        "by": {"type": "string", "description": "customer (default), item, item_group or salesperson"},
+        "measure": {"type": "string", "description": "sales (default) or profit"},
+        "months": {"type": "integer", "description": "Period in months, default 12"},
+        "top": {"type": "integer", "description": "How many to show, default 10"},
+    }),
+    "stock_levels_chart": (stock_levels_chart, "CHART of stock QUANTITY per item: units on hand, how many are free (not promised to customers) and on order. Use for 'show stock / in-stock quantity by item', 'stock of servers', 'what do we have in stock'. search filters by item name, code or group words.", {
+        "search": {"type": "string", "description": "Optional words to match items, e.g. server or printer"},
+        "warehouse": {"type": "string", "description": "Optional warehouse code"},
+        "top": {"type": "integer", "description": "How many items, default 15"},
+    }),
+    "inventory_status_chart": (inventory_status_chart, "CHART of stock VALUE (money) by status: line-stop risk, stockout risk, reorder, overstock, dead stock, OK. Use for 'where is our stock money', 'stock health', 'overstock/dead stock'. Not for quantities per item.", {}),
+    "stock_projection_chart": (stock_projection_chart, "CHART for ONE item: projected stock week by week, deliveries already coming, safety stock and when a new order would arrive. Use for 'when will item X run out', 'show X's stock outlook'. For several items use stock_levels_chart.", {
         "item_code": {"type": "string", "description": "Exact B1 item code"},
         "warehouse": {"type": "string", "description": "Optional warehouse code"},
     }),
-    "sales_trend_chart": (sales_trend_chart, "CHART: monthly sales revenue as bars, for the company or one item.", {
-        "months": {"type": "integer", "description": "Number of months, default 12"},
-        "item_code": {"type": "string", "description": "Optional item code"},
+    "receivables_chart": (receivables_chart, "CHART of money customers still owe: by how late (age buckets) or per customer with the overdue part. Use for 'who owes us', 'overdue invoices', 'receivables', 'debtors'.", {
+        "by": {"type": "string", "description": "age (default) or customer"},
+        "top": {"type": "integer", "description": "For by=customer: how many, default 10"},
     }),
-    "inventory_status_chart": (inventory_status_chart, "CHART: stock value by status (line-stop risk, stockout risk, overstock, dead stock, OK).", {}),
-    "custom_chart": (custom_chart, "CHART: any other comparison. Only use numbers taken from another tool's result in this conversation.", {
-        "title": {"type": "string", "description": "Chart title"},
-        "chart_type": {"type": "string", "description": "bar, barh, line or pie"},
+    "cash_forecast_chart": (cash_forecast_chart, "CHART of the expected cash balance for the next 13 weeks with the lowest point. Use for 'cash flow / cash forecast / will we have enough cash' graphs.", {}),
+    "custom_chart": (custom_chart, "CHART last resort, only if no chart above fits: one series of figures copied exactly from another tool's result in this conversation. Title must say exactly what the numbers are.", {
+        "title": {"type": "string", "description": "What the chart shows, e.g. 'Overdue amount by customer'"},
+        "chart_type": {"type": "string", "description": "bar (categories, default), line (over time) or pie (2-5 shares of one whole)"},
         "labels": {"type": "array", "items": {"type": "string"}, "description": "Category labels"},
         "values": {"type": "array", "items": {"type": "number"}, "description": "Values, same order as labels"},
-        "unit": {"type": "string", "description": "Optional unit, e.g. $ or units"},
+        "unit": {"type": "string", "description": "Unit of the values: the currency (e.g. $ or RM), units, %, days"},
+        "subtitle": {"type": "string", "description": "Optional: period and source of the figures"},
     }),
     "executive_summary": (executive_summary, "CEO view of the whole business in money and risk: operational risk and open customer orders affected, stock value / excess / dead stock, sales trend and top customers, order book, unpaid and overdue customer invoices, supplier on-time delivery. Use for any management or 'how is the business' question.", {}),
     "daily_briefing": (daily_briefing, "Today's morning briefing for management (risks, money, sales, market), as generated at 7 AM.", {}),
@@ -330,6 +379,10 @@ TOOLS = {
     "transaction_anomalies": (transaction_anomalies, "Nightly red-flag checks of recent transactions, high severity first: PRICE AP, PRICE AR, BELOW COST, DUPLICATE AP, 3-WAY QTY (billed more than received), 3-WAY PRICE (above PO price), NO PO, BANK CHANGE (supplier bank details changed), CREDIT SPIKE, JOURNAL (suspicious manual journal). Each row has the reason, paid status, money lost (impact) or amount at stake. Use for money leakage, overpaying, pricing errors, controls or fraud questions.", {
         "kind": {"type": "string", "description": "Optional type filter, e.g. DUPLICATE AP or BANK CHANGE"},
         "limit": {"type": "integer", "description": "Max rows, default 20"},
+    }),
+    "receivables": (receivables, "Who owes us money: unpaid customer invoices per customer with amount owed, amount overdue, number of invoices and oldest days late (customer given = also its invoices). Use for 'who owes us', 'receivables', 'debtors', 'unpaid/overdue invoices', 'how much does X owe'.", {
+        "customer": {"type": "string", "description": "Optional customer code or part of the name"},
+        "limit": {"type": "integer", "description": "Max customers, default 20"},
     }),
     "finance_analysis": (finance_analysis, "Money outlook from B1: 13-week cash forecast, customers likely to pay late, how early/late we pay suppliers, gross margins by customer/item/salesperson with trend, customers who stopped ordering (churn) and items often bought together (cross-sell). No topic = overview.", {
         "topic": {"type": "string", "description": "Optional: cash_forecast, late_payers, supplier_payments, margins, churn or cross_sell"},
@@ -381,7 +434,7 @@ TOOLS = {
         "sql": {"type": "string", "description": "A single SELECT statement"},
     }),
 }
-REQUIRED = {"stock_projection_chart": ["item_code"], "custom_chart": ["title", "chart_type", "labels", "values"], "web_search": ["query"], "read_web_page": ["url"], "search_items": ["text"], "item_details": ["item_code"], "sales_history": ["item_code"], "run_sql": ["sql"], "export_excel": ["title"]}
+REQUIRED = {"stock_projection_chart": ["item_code"], "custom_chart": ["title", "chart_type", "labels", "values", "unit"], "web_search": ["query"], "read_web_page": ["url"], "search_items": ["text"], "item_details": ["item_code"], "sales_history": ["item_code"], "run_sql": ["sql"], "export_excel": ["title"]}
 
 TOOL_SCHEMAS = [
     {"type": "function", "function": {"name": name, "description": desc,

@@ -13,6 +13,7 @@ import pandas as pd
 
 from .db import query
 from .export import excel_link
+from .numbers import label, money, qty
 
 MAX_INVOICE_ROWS = 30  # in the chat; the Excel download has every document
 TOP = 10
@@ -82,7 +83,7 @@ def sales_analysis(date_from: str = "", date_to: str = "", customer: str = "") -
     if d_from > d_to:
         d_from, d_to = d_to, d_from
     customer = (customer or "").strip()
-    currency = query("SELECT MainCurncy FROM OADM").MainCurncy.iloc[0]
+    currency = label(query("SELECT MainCurncy FROM OADM").MainCurncy.iloc[0])  # MYR is written RM (numbers.py)
 
     docs, items = _fetch(d_from, d_to, customer)
     if docs.empty and not (date_from or date_to):
@@ -151,7 +152,7 @@ def sales_analysis(date_from: str = "", date_to: str = "", customer: str = "") -
 
     out += ["", f"### Net sales by item{f' (top {TOP} of {len(item)})' if len(item) > TOP else ''}",
             "| Item | Qty | Net sales | Gross profit | Margin |", "|---|---:|---:|---:|---:|"]
-    out += [f"| {r['name']} ({c}) | {r.qty:,.0f} | {_money(r.net)} | {_money(r.gp)} | {_pct(r.gp, r.net)} |" for c, r in item.head(TOP).iterrows()]
+    out += [f"| {r['name']} ({c}) | {qty(r.qty)} | {_money(r.net)} | {_money(r.gp)} | {_pct(r.gp, r.net)} |" for c, r in item.head(TOP).iterrows()]
 
     shown = docs.sort_values(["DocDate", "DocNum"], ascending=False).head(MAX_INVOICE_ROWS)
     out += ["", f"### Invoices ({len(shown)} of {len(docs)} documents, newest first)",
@@ -219,7 +220,7 @@ def _excel(title, currency, kpi, month, cust, item, docs, overdue, d_from, d_to,
     period = f"{d_from:%d %b %Y} to {d_to:%d %b %Y}" + (f" · customer: {customer}" if customer else "") + f" · amounts in {currency}, net = excluding tax"
     k = kpi
     margin = f"{k['margin_pct']:.1f}% margin" if k.get("margin_pct") is not None else "Margin not available"
-    overdue_note = f"{k['overdue_amount']:,.0f} overdue" if k["overdue_invoices"] else "nothing overdue"
+    overdue_note = f"{money(k['overdue_amount'], currency)} overdue" if k["overdue_invoices"] else "nothing overdue"
     summary = {
         "tiles": [
             {"label": f"Net sales ({currency})", "value": k["net_sales_excl_tax"],

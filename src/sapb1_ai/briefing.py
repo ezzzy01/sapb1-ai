@@ -13,15 +13,17 @@ import httpx
 from .anomalies import TYPE_NAMES
 from .executive import executive_summary
 from .llm import ask
+from .numbers import money
 from .sync import DATA_DIR
 
 SYSTEM = """You write the top of a CEO's morning briefing. From the facts given, write exactly three short lines:
 1) the single most important risk and its money impact, 2) the most important business trend, 3) the one decision
-needed today. Plain language, no item codes unless essential, use the currency given, no invented numbers."""
+needed today. Plain language, no item codes unless essential, use the currency given, no invented numbers.
+Write every amount exactly as given (to the cent); never shorten to K/M or round."""
 
 
 def _m(cur: str, v) -> str:
-    return f"{cur}{v:,.0f}" if isinstance(v, (int, float)) else "n/a"
+    return money(v, cur) if isinstance(v, (int, float)) else "n/a"  # exact, to the cent (numbers.py)
 
 
 def build() -> str:

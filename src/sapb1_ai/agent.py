@@ -20,6 +20,7 @@ from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from .export import cleanup as cleanup_exports
+from .numbers import company_currency, prompt_rule
 from .tools import TOOL_SCHEMAS, call_tool
 
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
@@ -73,9 +74,12 @@ You have tools that read the company's B1 data. Use them for every question abou
 - Money is in the currency the tools return; never assume another currency.
 - available = OnHand - IsCommited; position = available + OnOrder (this is what is compared with the reorder point).
 - When a list is cut off (rows_total larger than rows returned), say how many there are in total.
-- Charts: only when the user explicitly asks for a chart or graph, call a *_chart tool. The chart is
-  displayed to the user automatically; do not repeat or describe the image code, just explain what it shows in a
-  few sentences using the summary numbers.
+- Charts: only when the user explicitly asks for a chart or graph, call the ONE *_chart tool whose description
+  matches what they asked (profit -> sales_trend_chart measure=profit; stock quantity per item -> stock_levels_chart;
+  top customers/items -> top_chart; who owes us -> receivables_chart; cash -> cash_forecast_chart). If none fits,
+  say which charts you can draw instead of drawing an unrelated one. The chart is displayed to the user
+  automatically; do not repeat or describe the image code, just explain what it shows in 2-4 sentences using the
+  summary numbers.
 - critical_alerts lists what may stop operations. LINE STOP RISK means a critical item (e.g. a production component)
   will run out before a normal order can arrive; always present it first, with run-out date, blocked production
   orders and the action.
@@ -148,6 +152,7 @@ def _wants_excel(messages: list[dict]) -> bool:
 _NOTE_LINE = re.compile(r"^> (🔎|⚠️|🛑) .*$|^> \*Ask .*$", re.M)
 _DOWNLOAD = re.compile(r"📥 \*\*\[Download Excel: [^\]]*\]\([^)]*\)\*\*[^\n]*")
 _DATA_IMAGE = re.compile(r"!\[([^\]]*)\]\(data:image/[^)]*\)")
+_FAKE_MARK = re.compile(r"^\s*\[Chart shown[^\]]*\][^\n]*$", re.M | re.I)
 
 
 def _clean_history(text: str) -> str:
@@ -156,7 +161,8 @@ def _clean_history(text: str) -> str:
     long chats with charts stay small."""
     text = _NOTE_LINE.sub("", text)
     text = _DOWNLOAD.sub("[An Excel file was given here. If the user asks for it again, make a new one with export_excel.]", text)
-    text = _DATA_IMAGE.sub(lambda m: f"[Chart shown: {m.group(1)}]", text)
+    text = _DATA_IMAGE.sub("", text)  # nothing left to imitate (it once typed "[Chart shown: …]" instead of drawing)
+    text = _FAKE_MARK.sub("", text)  # and the fake markers it typed then, still stored in old chats
     return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
@@ -187,6 +193,36 @@ def _recent_report(messages: list[dict]) -> tuple[str, dict, str] | None:
     return None
 
 
+def _chart_request(messages: list[dict]) -> tuple[str, dict] | None:
+    """The chart the latest message clearly asks for, as (tool, arguments); None when it names no topic
+    (e.g. "what graphs can you make?"), so only clear requests are enforced."""
+    text = _last_user_text(messages).lower()
+    if not CHART_WORDS.search(text):
+        return None
+    sales_at, profit_at = text.find("sales"), text.find("profit")
+    measure = "profit" if profit_at >= 0 and not (0 <= sales_at < profit_at) else "sales"
+    if re.search(r"\bcash", text):
+        return "cash_forecast_chart", {}
+    if re.search(r"\b(owe|owes|owed|owing|receivables?|debtors?|overdue|unpaid|hutang|outstanding)\b", text):
+        return "receivables_chart", {"by": "customer" if re.search(r"\b(customers?|who|which|top)\b", text) else "age"}
+    stock = re.search(r"\b(stocks?|inventory|on hand|quantity|qty|stok)\b", text)
+    if not stock and re.search(r"\b(top|best|biggest|largest|ranking|rank|most|highest)\b|\bby (customers?|items?|products?|groups?|"
+                               r"categor\w*|sales ?(person|people|reps?))\b|\bper (customer|item|product|salesperson)\b", text):
+        by = ("salesperson" if re.search(r"sales ?(person|people|reps?)", text) else
+              "item_group" if re.search(r"\b(groups?|categor\w*)\b", text) else
+              "item" if re.search(r"\b(items?|products?|sellers?|selling)\b", text) else "customer")
+        return "top_chart", {"by": by, "measure": measure}
+    if "margin" in text:
+        return "sales_trend_chart", {"measure": "margin"}
+    if re.search(r"\b(stock value|overstock|dead stock|stock health|stock status)\b", text):
+        return "inventory_status_chart", {}
+    if stock:
+        return "stock_levels_chart", {}
+    if re.search(r"\b(profit|sales|revenue|turnover|jualan|trend|monthly|income)\b", text):
+        return "sales_trend_chart", {"measure": measure}
+    return None
+
+
 def _is_task(messages: list[dict]) -> bool:
     """Open WebUI background tasks (titles, tags, follow-ups) don't need B1 tools."""
     last = next((m for m in reversed(messages) if m.get("role") == "user"), {})
@@ -204,6 +240,7 @@ def _prepare(messages: list[dict], use_tools: bool) -> list[dict]:
         if mw.get("assessment"):
             system += (f"\n\nLatest automatic market watch ({mw['generated_at'][:10]}, from the internet):\n{mw['assessment']}"
                        f"\nExchange rates: {json.dumps(mw.get('fx', {}).get('rates'))} (base {mw.get('fx', {}).get('base')})")
+        system += "\n\n" + prompt_rule(company_currency())
         system += ("\n\nNumbers rule: every number you state must appear in the data above or in a tool result. "
                    "If something is not there, look it up with a tool or say you do not have it. Never estimate or fill gaps.")
     out = [{"role": "system", "content": system}]
@@ -225,6 +262,7 @@ LOOKUP_NOTES = {
     "reorder_report": "Checking what needs ordering", "search_items": "Finding the item", "item_details": "Looking up the item",
     "sales_history": "Looking at past sales", "sales_analysis": "Building the sales analysis", "export_excel": "Preparing the Excel file", "run_sql": "Looking it up in SAP", "market_watch": "Reading the market watch",
     "transaction_anomalies": "Checking transactions for red flags", "finance_analysis": "Checking cash, payments and margins",
+    "receivables": "Checking who owes us money",
     "daily_briefing": "Reading today's briefing", "executive_summary": "Checking the business overview",
     "web_search": "Searching the internet", "read_web_page": "Reading a web page", "fx_rates": "Checking exchange rates",
 }
@@ -269,6 +307,9 @@ async def _run(messages: list[dict], use_tools: bool):
     done_calls: dict[str, str] = {}  # same tool + same arguments -> earlier result, so a lookup is never run twice
     # Asked for Excel: hold the model's text back until a real file exists, so it can never just claim one.
     excel_needed, excel_made, excel_nudged = use_tools and _wants_excel(messages), False, False
+    # Asked for a specific chart: likewise held until a real chart exists (it once typed a fake chart and invented figures).
+    chart_req = _chart_request(messages) if use_tools else None
+    chart_made, chart_nudged = False, False
     async with httpx.AsyncClient(timeout=httpx.Timeout(STEP_TIMEOUT_S)) as client:
         for step in range(MAX_TOOL_ROUNDS + 1):
             body = {"model": BASE_MODEL, "messages": msgs, "stream": True, "think": False,
@@ -281,7 +322,7 @@ async def _run(messages: list[dict], use_tools: bool):
                     "No more lookups are possible for this question. Answer now using only the tool results above. "
                     "Say briefly what you could not get, and suggest how the user can narrow the question if needed.")}]
             content, tool_calls = "", []
-            hold = excel_needed and not excel_made
+            hold = (excel_needed and not excel_made) or (chart_req is not None and not chart_made)
             try:
                 async with client.stream("POST", f"{OLLAMA_URL}/api/chat", json=body) as r:
                     r.raise_for_status()
@@ -299,6 +340,33 @@ async def _run(messages: list[dict], use_tools: bool):
                 yield ("\n\n**The AI engine is busy or still loading and did not answer in time.** "
                        "Please send your question again in a minute.")
                 return
+            if not tool_calls and hold and not (excel_needed and not excel_made):
+                tool, args = chart_req
+                if not chart_nudged and step < MAX_TOOL_ROUNDS:
+                    chart_nudged = True
+                    log.info("Asked for a chart but none was drawn; asking the model to draw it")
+                    msgs.append({"role": "system", "content": (
+                        f"The user asked for a chart and none has been drawn. Call {tool} now with arguments like "
+                        f"{json.dumps(args)} (or the *_chart tool that matches their words better). Never write chart "
+                        "placeholders, image text or figures yourself.")})
+                    continue
+                # Still nothing: draw the chart that matches their words ourselves, then let the model explain it.
+                log.info("Model drew no chart twice; drawing %s", tool)
+                yield _lookup_note(tool)
+                try:
+                    result = await asyncio.wait_for(asyncio.to_thread(call_tool, tool, args), TOOL_TIMEOUT_S)
+                    parsed = json.loads(result)
+                except (TimeoutError, ValueError):
+                    parsed = {"error": "the chart took too long"}
+                if "data:image" not in str(parsed.get("_display", "")):
+                    yield f"I couldn't draw that chart: {parsed.get('error', 'no data')}."
+                    return
+                chart_made = True
+                yield parsed.pop("_display") + "\n\n"
+                msgs.append({"role": "assistant", "content": "", "tool_calls": [{"function": {"name": tool, "arguments": args}}]})
+                msgs.append({"role": "tool", "tool_name": tool,
+                             "content": json.dumps({"shown_to_user": True, **parsed}, default=str)})
+                continue
             if not tool_calls and hold:
                 recent = _recent_report(messages)
                 if not excel_nudged and step < MAX_TOOL_ROUNDS:
@@ -373,12 +441,15 @@ async def _run(messages: list[dict], use_tools: bool):
                     parsed = None
                 if isinstance(parsed, dict) and "Download Excel" in str(parsed.get("_display", "")):
                     excel_made = True
+                if isinstance(parsed, dict) and fn["name"].endswith("_chart") and "data:image" in str(parsed.get("_display", "")):
+                    chart_made = True
                 if isinstance(parsed, dict) and "_display" in parsed:
                     yield parsed.pop("_display") + "\n\n"
                     result = json.dumps({"shown_to_user": True, **parsed}, default=str)
                 msgs.append({"role": "tool", "content": result, "tool_name": fn["name"]})
         # Only reached if the model still asked for a lookup after the limit.
-        yield "\n\n*I could not finish every lookup for this question; the answer above is based on what I found.*"
+        yield ("\n\n*I could not finish every lookup for this question; the answer above is based on what I found.*" if answered
+               else "*I couldn't find the answer to this in B1. Please rephrase it or ask about one part at a time.*")
 
 
 def _chunk(cid: str, delta: dict, finish: str | None = None) -> str:
