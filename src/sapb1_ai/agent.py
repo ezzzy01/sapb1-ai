@@ -48,6 +48,8 @@ they want the result. So:
 - Money with the currency and thousands separators, rounded to whole units; percentages to one decimal.
 - No method talk (forecast models, z-scores, medians) unless they ask how it was worked out.
 - If a word they use is ambiguous (e.g. "this month", "cash"), pick the common meaning, say which in a few words, and answer.
+For any sales report, sales analysis, revenue or invoices-issued question call sales_analysis once (with dates or a
+customer if they gave them); it shows the full report itself, so only add a few insights after it.
 For "how is the business / what should I know" questions use executive_summary or daily_briefing. For cash, who owes us,
 paying suppliers, margins and lost customers use finance_analysis; for overpaying, duplicate invoices, pricing errors,
 controls or fraud use transaction_anomalies. Its money_lost is purchases paid above the usual price plus sales made below
@@ -71,7 +73,7 @@ You have tools that read the company's B1 data. Use them for every question abou
 - critical_alerts lists what may stop operations. LINE STOP RISK means a critical item (e.g. a production component)
   will run out before a normal order can arrive; always present it first, with run-out date, blocked production
   orders and the action.
-- Answer from tool results only. If a tool returns an error, say so plainly."""
+- Answer from tool results only. If a tool returns an error, say so plainly. Never repeat a lookup that failed."""
 
 app = FastAPI(title=MODEL_NAME)
 log = logging.getLogger("uvicorn.error")
@@ -139,7 +141,7 @@ def _prepare(messages: list[dict], use_tools: bool) -> list[dict]:
 LOOKUP_NOTES = {
     "stock_summary": "Checking the stock overview", "critical_alerts": "Checking what could stop operations",
     "reorder_report": "Checking what needs ordering", "search_items": "Finding the item", "item_details": "Looking up the item",
-    "sales_history": "Looking at past sales", "run_sql": "Looking it up in SAP", "market_watch": "Reading the market watch",
+    "sales_history": "Looking at past sales", "sales_analysis": "Building the sales analysis", "run_sql": "Looking it up in SAP", "market_watch": "Reading the market watch",
     "transaction_anomalies": "Checking transactions for red flags", "finance_analysis": "Checking cash, payments and margins",
     "daily_briefing": "Reading today's briefing", "executive_summary": "Checking the business overview",
     "web_search": "Searching the internet", "read_web_page": "Reading a web page", "fx_rates": "Checking exchange rates",
@@ -182,12 +184,18 @@ async def _run(messages: list[dict], use_tools: bool):
     msgs = await asyncio.to_thread(_prepare, messages, use_tools)
     answered = False
     tools = TOOL_SCHEMAS if _wants_chart(messages) else [s for s in TOOL_SCHEMAS if not s["function"]["name"].endswith("_chart")]
+    done_calls: dict[str, str] = {}  # same tool + same arguments -> earlier result, so a lookup is never run twice
     async with httpx.AsyncClient(timeout=httpx.Timeout(STEP_TIMEOUT_S)) as client:
-        for _ in range(MAX_TOOL_ROUNDS + 1):
+        for step in range(MAX_TOOL_ROUNDS + 1):
             body = {"model": BASE_MODEL, "messages": msgs, "stream": True, "think": False,
                     "options": {"num_predict": MAX_TOKENS_PER_STEP}}
-            if use_tools:
+            if use_tools and step < MAX_TOOL_ROUNDS:
                 body["tools"] = tools
+            elif use_tools:
+                # Lookup limit reached: no more tools, answer from what has been found so far.
+                body["messages"] = msgs + [{"role": "system", "content": (
+                    "No more lookups are possible for this question. Answer now using only the tool results above. "
+                    "Say briefly what you could not get, and suggest how the user can narrow the question if needed.")}]
             content, tool_calls = "", []
             try:
                 async with client.stream("POST", f"{OLLAMA_URL}/api/chat", json=body) as r:
@@ -215,12 +223,19 @@ async def _run(messages: list[dict], use_tools: bool):
                 args = fn.get("arguments") or {}
                 if isinstance(args, str):
                     args = json.loads(args or "{}")
+                key = fn["name"] + json.dumps(args, sort_keys=True, default=str)
+                if key in done_calls:
+                    msgs.append({"role": "tool", "tool_name": fn["name"], "content": json.dumps({
+                        "error": "You already made exactly this lookup; its result is above. Do not repeat it: use that result, "
+                                 "try something different, or answer with what you have."})})
+                    continue
                 yield _lookup_note(fn["name"])
                 if fn["name"].endswith("_chart") and not _wants_chart(messages):
                     msgs.append({"role": "tool", "content": json.dumps({"error": "Charts are only shown when the user asks for one."}),
                                  "tool_name": fn["name"]})
                     continue
                 result = await asyncio.to_thread(call_tool, fn["name"], args)
+                done_calls[key] = result
                 # Charts: show the image to the user directly; the model only gets the summary.
                 try:
                     parsed = json.loads(result)
@@ -228,9 +243,10 @@ async def _run(messages: list[dict], use_tools: bool):
                     parsed = None
                 if isinstance(parsed, dict) and "_display" in parsed:
                     yield parsed.pop("_display") + "\n\n"
-                    result = json.dumps({"chart_shown_to_user": True, **parsed}, default=str)
+                    result = json.dumps({"shown_to_user": True, **parsed}, default=str)
                 msgs.append({"role": "tool", "content": result, "tool_name": fn["name"]})
-        yield "\n\n*Stopped after too many lookups. Please ask a narrower question.*"
+        # Only reached if the model still asked for a lookup after the limit.
+        yield "\n\n*I could not finish every lookup for this question; the answer above is based on what I found.*"
 
 
 def _chunk(cid: str, delta: dict, finish: str | None = None) -> str:
