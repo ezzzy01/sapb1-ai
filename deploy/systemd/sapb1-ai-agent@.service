@@ -1,0 +1,16 @@
+[Unit]
+Description=SAP B1 AI chat service for company %i
+After=network-online.target
+
+[Service]
+WorkingDirectory=%h/sapb1-ai
+Environment=SAPB1_COMPANY=%i
+Environment=PYTHONWARNINGS=ignore
+# Only AGENT_PORT is used here; the code reads the rest of companies/%i/company.env itself.
+EnvironmentFile=%h/sapb1-ai/companies/%i/company.env
+ExecStart=%h/.local/bin/uv run --frozen uvicorn sapb1_ai.agent:app --host 0.0.0.0 --port ${AGENT_PORT}
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

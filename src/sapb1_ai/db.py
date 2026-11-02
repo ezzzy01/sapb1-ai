@@ -2,17 +2,13 @@
 
 import os
 from decimal import Decimal
-from pathlib import Path
 
 import mssql_python
 import pandas as pd
-from dotenv import load_dotenv
-
-load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
 
 def connect(database: str | None = None) -> mssql_python.Connection:
-    """Open a connection using the settings in .env."""
+    """Open a connection using this company's settings (see company.py)."""
     missing = [k for k in ("SAPB1_SQL_HOST", "SAPB1_SQL_USER", "SAPB1_SQL_PASSWORD") if not os.getenv(k)]
     if missing:
         raise SystemExit(f"Missing in .env: {', '.join(missing)} (copy .env.example to .env)")

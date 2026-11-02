@@ -1,0 +1,9 @@
+[Unit]
+Description=SAP B1 AI: daily CEO briefing for company %i
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/sapb1-ai
+Environment=SAPB1_COMPANY=%i
+Environment=PYTHONWARNINGS=ignore
+ExecStart=%h/.local/bin/uv run --frozen python -m sapb1_ai.briefing

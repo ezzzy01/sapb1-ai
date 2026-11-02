@@ -1,4 +1,4 @@
-/* SAP Fiori Horizon look for the SAP B1 Stock AI interface (Open WebUI custom.css).
+/* SAP Fiori Horizon look for the SAP B1 AI interface (Open WebUI custom.css).
    Only mounted into the sapb1-ai container; the personal Open WebUI is unaffected.
    Colours follow the Horizon (light) and Horizon Evening (dark) theme parameters. */
 
@@ -67,7 +67,7 @@ body { background: var(--sap-bg); color: var(--sap-text); }
 
 /* ---------- Shell bar ---------- */
 .app::before {
-  content: "SAP B1 Stock AI";
+  content: "SAP B1 AI";
   position: fixed; inset: 0 0 auto 0; z-index: 40;
   height: var(--sap-shell-h);
   display: flex; align-items: center;

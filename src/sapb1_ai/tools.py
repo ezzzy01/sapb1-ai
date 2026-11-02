@@ -1,4 +1,4 @@
-"""Tools the stock assistant can call. All read-only.
+"""Tools the SAP B1 AI chat assistant can call. All read-only.
 
 Report-based tools read the files written by sync.py / forecast.py; item_details and
 run_sql also query B1 live through the read-only ai_reader login.
@@ -10,9 +10,11 @@ from datetime import datetime
 
 import pandas as pd
 
+from .anomalies import TYPE_NAMES
 from .charts import custom_chart, inventory_status_chart, sales_trend_chart, stock_projection_chart
 from .db import connect, query
 from .executive import executive_summary
+from .sales import sales_analysis
 from .sync import DATA_DIR
 from .web import fx_rates, read_web_page, web_search
 
@@ -121,12 +123,18 @@ def sales_history(item_code: str, weeks: int = 26) -> dict:
 
 
 _FORBIDDEN = re.compile(r"\b(insert|update|delete|merge|drop|alter|create|truncate|exec|execute|grant|revoke|into|openrowset|opendatasource|xp_\w+|sp_\w+)\b", re.I)
+# Only this company's database: no Other.dbo.Table / Other..Table names, linked servers or database lists.
+# (The real barrier is a SQL login per company that can open only its own database; this stops the attempt early.)
+_NAME = r'(?:\[[^\]]*\]|"[^"]*"|\w+)'
+_OTHER_DB = re.compile(rf"{_NAME}\s*\.\s*(?:{_NAME})?\s*\.\s*{_NAME}|\bopenquery\b|\bsys\s*\.\s*(?:databases|servers)\b", re.I)
 
 
 def run_sql(sql: str) -> dict:
     stmt = sql.strip().rstrip(";").strip()
     if not re.match(r"^(select|with)\b", stmt, re.I) or ";" in stmt or _FORBIDDEN.search(stmt):
         return {"error": "Only a single read-only SELECT statement is allowed."}
+    if _OTHER_DB.search(re.sub(r"'(?:[^']|'')*'", "''", stmt)):
+        return {"error": "Only this company's own database can be queried."}
     conn = connect()
     try:
         cur = conn.cursor()
@@ -134,7 +142,8 @@ def run_sql(sql: str) -> dict:
         cols = [c[0] for c in cur.description]
         rows = cur.fetchmany(MAX_ROWS + 1)
     except Exception as e:
-        return {"error": str(e).split("DDBC Error: ")[-1][:500]}
+        return {"error": str(e).split("DDBC Error: ")[-1][:500],
+                "note": "This query failed. Do not run it again unchanged: fix it once, or tell the user what you could not get."}
     finally:
         conn.close()
     df = pd.DataFrame.from_records(rows[:MAX_ROWS], columns=cols)
@@ -161,7 +170,7 @@ def transaction_anomalies(kind: str = "", limit: int = 20) -> dict:
     limit = max(1, min(int(limit), MAX_ROWS))
     paid = pd.Series([a["paid"] for a in items], dtype=object).value_counts().to_dict()
     return {"generated_at": an["generated_at"], "currency": an["currency"], "documents_since": an["documents_since"],
-            "by_type": an["by_type"],
+            "by_type": [t | {"meaning": TYPE_NAMES.get(t["type"], t["type"])} for t in an["by_type"]],
             "total_money_lost": round(sum(t["money_lost"] for t in an["by_type"]), 2),
             "total_amount_to_review": round(sum(t.get("amount_to_review", 0) for t in an["by_type"]), 2), "rows_total": len(items), "rows_by_payment_status": paid, "rows": items[:limit]}
 
@@ -254,7 +263,12 @@ TOOLS = {
         "item_code": {"type": "string", "description": "Exact B1 item code"},
         "weeks": {"type": "integer", "description": "How many recent weeks, default 26"},
     }),
-    "run_sql": (run_sql, "Run one read-only T-SQL SELECT against the live B1 database (max 200 rows). Only use when the other tools cannot answer. Filter documents with CANCELED = 'N'.", {
+    "sales_analysis": (sales_analysis, "Finished sales analysis report by invoice, LIVE from B1: net sales after credit memos, tax, gross profit and margin, sales by month, by customer and by item, what is still to be paid and overdue, and the invoice list. The report is shown to the user directly. Use it for ANY sales report, sales analysis, revenue, invoices-issued or sales-by-customer/item/month question; one call answers it.", {
+        "date_from": {"type": "string", "description": "Optional start: YYYY-MM-DD, YYYY-MM or YYYY. Empty = 1 January of the end year"},
+        "date_to": {"type": "string", "description": "Optional end: YYYY-MM-DD, YYYY-MM or YYYY (YYYY-MM = whole month). Empty = today"},
+        "customer": {"type": "string", "description": "Optional customer code or part of the name"},
+    }),
+    "run_sql": (run_sql, "Run one read-only T-SQL SELECT against the live B1 database (max 200 rows). Only use when the other tools cannot answer (never for sales reports: use sales_analysis). Filter documents with CANCELED = 'N'.", {
         "sql": {"type": "string", "description": "A single SELECT statement"},
     }),
 }

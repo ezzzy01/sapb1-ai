@@ -38,6 +38,12 @@ MIN_PRICE_HISTORY = 5
 DUPLICATE_DAYS = 14
 PO_PRICE_TOL_PCT = float(os.getenv("PO_PRICE_TOL_PCT", "2"))
 CREDIT_RATIO = 0.10
+# Plain-language name of each check, for people who don't know the codes.
+TYPE_NAMES = {"DUPLICATE AP": "possible duplicate supplier invoices", "BELOW COST": "sales below cost",
+              "PRICE AP": "unusual purchase prices", "PRICE AR": "unusual sales prices",
+              "3-WAY QTY": "supplier invoices billing more than received", "3-WAY PRICE": "supplier invoices above PO price",
+              "NO PO": "supplier invoices without a PO", "BANK CHANGE": "supplier bank detail changes",
+              "CREDIT SPIKE": "credit note spikes", "JOURNAL": "suspicious manual journals"}
 COLS = ["type", "severity", "doc", "DocDate", "partner", "ItemCode", "ItemName", "qty", "unit_price", "usual_price",
         "deviation_pct", "impact", "amount", "paid", "reason"]
 

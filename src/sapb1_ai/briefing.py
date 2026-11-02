@@ -10,6 +10,7 @@ from datetime import datetime
 
 import httpx
 
+from .anomalies import TYPE_NAMES
 from .executive import executive_summary
 from .llm import ask
 from .sync import DATA_DIR
@@ -48,15 +49,9 @@ def build() -> str:
                      f"({_m(cur, ar['overdue_over_90_days'])} over 90 days).")
     an_path = DATA_DIR / "anomalies.json"
     if an_path.exists() and (found := json.loads(an_path.read_text())["by_type"]):
-        names = {"DUPLICATE AP": "possible duplicate supplier invoices", "BELOW COST": "sales below cost",
-                 "PRICE AP": "unusual purchase prices", "PRICE AR": "unusual sales prices",
-                 "3-WAY QTY": "supplier invoices billing more than received", "3-WAY PRICE": "supplier invoices above PO price",
-                 "NO PO": "supplier invoices without a PO", "BANK CHANGE": "supplier bank detail changes",
-                 "CREDIT SPIKE": "credit note spikes", "JOURNAL": "suspicious manual journals"}
-
         def money(t):
             return _m(cur, t["money_lost"]) + " lost" if t["money_lost"] else _m(cur, t.get("amount_to_review", 0)) + " to review"
-        facts.append("- Transaction checks: " + "; ".join(f"{t['count']} {names.get(t['type'], t['type'])} ({money(t)})"
+        facts.append("- Transaction checks: " + "; ".join(f"{t['count']} {TYPE_NAMES.get(t['type'], t['type'])} ({money(t)})"
                                                            for t in found) + ".")
     fin_path = DATA_DIR / "finance.json"
     if fin_path.exists():
