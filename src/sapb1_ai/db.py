@@ -25,7 +25,12 @@ def connect(database: str | None = None) -> mssql_python.Connection:
     ]
     if db:
         parts.append(f"Database={db}")
-    return mssql_python.connect(";".join(parts))
+    # Never wait forever: opening the connection gets 15 seconds, each query SAPB1_SQL_TIMEOUT seconds (a dropped
+    # network link to SQL Server otherwise hangs the chat). In mssql_python, connect(timeout=) is the login limit and
+    # Connection.timeout the per-query limit.
+    conn = mssql_python.connect(";".join(parts), timeout=15)
+    conn.timeout = int(os.getenv("SAPB1_SQL_TIMEOUT", "60"))
+    return conn
 
 
 def query(sql: str, params: tuple = (), conn: mssql_python.Connection | None = None) -> pd.DataFrame:

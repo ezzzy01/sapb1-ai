@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>$title · SAP B1 AI</title>
+<style>
+/* Sign-in page for SAP B1 AI (src/sapb1_ai/portal.py). SAP Fiori Horizon look, like the chat sites (webui/fiori.css). */
+@font-face { font-family: "72"; font-weight: 400; font-display: swap;
+  src: url("https://cdn.jsdelivr.net/npm/@sap-theming/theming-base-content@11.36.5/content/Base/baseLib/baseTheme/fonts/72-Regular.woff2") format("woff2"); }
+@font-face { font-family: "72"; font-weight: 700; font-display: swap;
+  src: url("https://cdn.jsdelivr.net/npm/@sap-theming/theming-base-content@11.36.5/content/Base/baseLib/baseTheme/fonts/72-Bold.woff2") format("woff2"); }
+
+:root {
+  --brand: #0070f2; --brand-hover: #0064d9; --brand-active: #0054b6;
+  --bg: #f5f6f7; --card: #ffffff; --text: #1d2d3e; --label: #556b82; --muted: #788fa6;
+  --field: #ffffff; --field-border: #bcc3ca; --field-hover: #0070f2; --icon: #788fa6;
+  --err-bg: #fff4f2; --err-line: #e90b0b; --err-text: #aa0808;
+  --ok-bg: #f5fae5; --ok-line: #30914c; --ok-text: #256f3a;
+  --shadow: 0 0 0.125rem rgba(34,53,72,.12), 0 1rem 2.5rem rgba(34,53,72,.12);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --brand: #4db1ff; --brand-hover: #75c3ff; --brand-active: #9fd5ff;
+    --bg: #12171c; --card: #1d232a; --text: #eaecee; --label: #a9b4be; --muted: #8396a8;
+    --field: #12171c; --field-border: #4a5b6c; --field-hover: #4db1ff; --icon: #8396a8;
+    --err-bg: #3a1c1c; --err-line: #ff6a6a; --err-text: #ffb3b3;
+    --ok-bg: #18301f; --ok-line: #5dc122; --ok-text: #b5e3a0;
+    --shadow: 0 1rem 2.5rem rgba(0,0,0,.45);
+  }
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body { margin: 0; background: var(--bg); color: var(--text);
+  font: 400 0.9375rem/1.45 "72", "72full", "Segoe UI", system-ui, Arial, sans-serif; -webkit-font-smoothing: antialiased; }
+
+.shell { min-height: 100%; display: grid; grid-template-columns: minmax(380px, 46%) 1fr; }
+
+/* ---------- Brand panel ---------- */
+.brand { position: relative; overflow: hidden; color: #fff; padding: 3rem 3.5rem;
+  display: flex; flex-direction: column; justify-content: space-between;
+  background:
+    radial-gradient(60rem 40rem at 110% 110%, rgba(77,177,255,.45), transparent 60%),
+    radial-gradient(40rem 30rem at -10% -20%, rgba(0,112,242,.55), transparent 60%),
+    linear-gradient(150deg, #071a36 0%, #0a2f6b 48%, #0058cc 100%); }
+.brand::before { content: ""; position: absolute; inset: 0; opacity: .14; pointer-events: none;
+  background-image: linear-gradient(rgba(255,255,255,.5) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.5) 1px, transparent 1px);
+  background-size: 44px 44px; mask-image: linear-gradient(160deg, #000 0%, transparent 70%); -webkit-mask-image: linear-gradient(160deg, #000 0%, transparent 70%); }
+.brand > * { position: relative; }
+.logo { display: flex; align-items: center; gap: .75rem; font-weight: 700; font-size: 1.25rem; letter-spacing: .01em; }
+.logo-mark { width: 2.5rem; height: 2.5rem; border-radius: .75rem; display: grid; place-items: center;
+  background: linear-gradient(135deg, #4db1ff, #0070f2); box-shadow: 0 .5rem 1.25rem rgba(0,0,0,.3), inset 0 0 0 1px rgba(255,255,255,.25); }
+.pitch h1 { font-size: clamp(1.9rem, 3vw, 2.6rem); line-height: 1.15; margin: 0 0 1rem; font-weight: 700; letter-spacing: -.01em; }
+.pitch p { margin: 0 0 2rem; color: rgba(255,255,255,.82); font-size: 1.0625rem; max-width: 30rem; }
+.features { list-style: none; margin: 0; padding: 0; display: grid; gap: .875rem; }
+.features li { display: flex; align-items: center; gap: .875rem; color: rgba(255,255,255,.92); }
+.features .ic { flex: none; width: 2.25rem; height: 2.25rem; border-radius: .625rem; display: grid; place-items: center;
+  background: rgba(255,255,255,.12); box-shadow: inset 0 0 0 1px rgba(255,255,255,.18); }
+.trust { display: flex; align-items: center; gap: .625rem; font-size: .8125rem; color: rgba(255,255,255,.72); }
+
+/* ---------- Sign-in panel ---------- */
+.panel { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 2.5rem 1.5rem; }
+.card { width: 100%; max-width: 26rem; background: var(--card); border-radius: 1rem; box-shadow: var(--shadow); padding: 2.5rem 2.25rem 2rem; }
+.card h2 { margin: 0; font-size: 1.5rem; font-weight: 700; }
+.card .sub { margin: .375rem 0 1.75rem; color: var(--label); }
+
+.field { margin-bottom: 1.125rem; }
+.field label { display: block; font-size: .8125rem; color: var(--label); margin-bottom: .375rem; }
+.control { position: relative; display: flex; align-items: center; }
+.control > svg.lead { position: absolute; left: .875rem; width: 1.125rem; height: 1.125rem; color: var(--icon); pointer-events: none; }
+.control input, .control select { width: 100%; height: 2.75rem; padding: 0 .875rem 0 2.625rem; font: inherit; color: var(--text);
+  background: var(--field); border: 1px solid var(--field-border); border-radius: .5rem; outline: none;
+  transition: border-color .15s, box-shadow .15s; appearance: none; -webkit-appearance: none; }
+.control select { padding-right: 2.5rem; cursor: pointer; }
+.control .chev { position: absolute; right: .875rem; width: 1rem; height: 1rem; color: var(--icon); pointer-events: none; }
+.control input:hover, .control select:hover { border-color: var(--field-hover); }
+.control input:focus, .control select:focus { border-color: var(--brand); box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 22%, transparent); }
+.control input::placeholder { color: var(--muted); }
+.reveal { position: absolute; right: .375rem; height: 2.125rem; width: 2.125rem; border: 0; border-radius: .375rem; background: transparent;
+  color: var(--icon); cursor: pointer; display: grid; place-items: center; }
+.reveal:hover { background: color-mix(in srgb, var(--brand) 10%, transparent); color: var(--brand); }
+.has-reveal input { padding-right: 2.75rem; }
+.hint { font-size: .75rem; color: var(--muted); margin-top: .375rem; }
+
+.btn { width: 100%; height: 2.75rem; margin-top: .5rem; border: 0; border-radius: .5rem; font: inherit; font-weight: 700;
+  color: #fff; background: var(--brand); cursor: pointer; transition: background .15s, transform .05s;
+  display: inline-flex; align-items: center; justify-content: center; gap: .5rem; }
+@media (prefers-color-scheme: dark) { .btn { color: #0b1a2b; } }
+.btn:hover { background: var(--brand-hover); }
+.btn:active { background: var(--brand-active); transform: translateY(1px); }
+.btn:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.btn[disabled] { opacity: .75; cursor: progress; }
+.spinner { width: 1rem; height: 1rem; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent;
+  animation: spin .7s linear infinite; display: none; }
+.busy .spinner { display: inline-block; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.msg { display: flex; gap: .625rem; align-items: flex-start; padding: .75rem .875rem; border-radius: .5rem; margin-bottom: 1.25rem;
+  font-size: .875rem; border-left: 4px solid; }
+.msg svg { flex: none; width: 1.125rem; height: 1.125rem; margin-top: .0625rem; }
+.msg.err { background: var(--err-bg); border-color: var(--err-line); color: var(--err-text); }
+.msg.ok { background: var(--ok-bg); border-color: var(--ok-line); color: var(--ok-text); }
+
+.links { margin-top: 1.5rem; display: flex; justify-content: center; font-size: .875rem; }
+.links a { color: var(--brand); text-decoration: none; font-weight: 700; }
+.links a:hover { text-decoration: underline; }
+.foot { margin-top: 1.5rem; font-size: .75rem; color: var(--muted); display: flex; align-items: center; gap: .375rem; }
+
+/* ---------- Small screens: brand panel becomes a header ---------- */
+@media (max-width: 900px) {
+  .shell { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+  .brand { padding: 1.25rem 1.5rem; }
+  .pitch, .trust { display: none; }
+  .panel { justify-content: flex-start; padding-top: 2rem; }
+  .card { padding: 2rem 1.5rem 1.5rem; }
+}
+</style>
+</head>
+<body>
+<div class="shell">
+  <aside class="brand" aria-hidden="true">
+    <div class="logo">
+      <span class="logo-mark">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 19V10M10 19V5M16 19v-6"/><path d="M19.5 3.5l.6 1.4 1.4.6-1.4.6-.6 1.4-.6-1.4-1.4-.6 1.4-.6z" fill="#fff" stroke-width="1"/>
+        </svg>
+      </span>
+      SAP B1 AI
+    </div>
+    <div class="pitch">
+      <h1>Your business,<br>answered.</h1>
+      <p>Ask about sales, stock, cash and customers in plain words, in English or Bahasa Malaysia, and get answers from your own SAP Business One data.</p>
+      <ul class="features">
+        <li><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/></svg></span>Sales and finance reports in seconds</li>
+        <li><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg></span>Stock alerts before you run out</li>
+        <li><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M8 13l3 4M11 13l-3 4M14 17h3"/></svg></span>Excel downloads, ready to share</li>
+      </ul>
+    </div>
+    <div class="trust">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 018 0v4"/></svg>
+      Each company's data and chats are kept separate. Read-only access to SAP.
+    </div>
+  </aside>
+
+  <main class="panel">
+    <div class="card">
+      $content
+    </div>
+    <div class="foot">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 018 0v4"/></svg>
+      Secure sign-in · SAP B1 AI
+    </div>
+  </main>
+</div>
+<script>
+try { localStorage.removeItem("token"); } catch (e) {}
+document.querySelectorAll(".reveal").forEach((b) => b.addEventListener("click", () => {
+  const input = b.parentElement.querySelector("input");
+  const show = input.type === "password";
+  input.type = show ? "text" : "password";
+  b.setAttribute("aria-label", show ? "Hide password" : "Show password");
+  b.setAttribute("aria-pressed", String(show));
+}));
+document.querySelectorAll("form").forEach((f) => f.addEventListener("submit", () => {
+  const btn = f.querySelector(".btn");
+  if (btn) { btn.disabled = true; btn.classList.add("busy"); btn.querySelector(".label").textContent = btn.dataset.busy || "Please wait…"; }
+}));
+const first = document.querySelector("[autofocus]") || document.querySelector("input:not([value]), input[value='']");
+if (first) first.focus();
+</script>
+</body>
+</html>
