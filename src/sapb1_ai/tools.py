@@ -14,6 +14,7 @@ from .anomalies import TYPE_NAMES
 from .charts import custom_chart, inventory_status_chart, sales_trend_chart, stock_projection_chart
 from .db import connect, query
 from .executive import executive_summary
+from .export import excel_link
 from .sales import sales_analysis
 from .sync import DATA_DIR
 from .web import fx_rates, read_web_page, web_search
@@ -129,12 +130,18 @@ _NAME = r'(?:\[[^\]]*\]|"[^"]*"|\w+)'
 _OTHER_DB = re.compile(rf"{_NAME}\s*\.\s*(?:{_NAME})?\s*\.\s*{_NAME}|\bopenquery\b|\bsys\s*\.\s*(?:databases|servers)\b", re.I)
 
 
+def _sql_problem(stmt: str) -> str | None:
+    if not re.match(r"^(select|with)\b", stmt, re.I) or ";" in stmt or _FORBIDDEN.search(stmt):
+        return "Only a single read-only SELECT statement is allowed."
+    if _OTHER_DB.search(re.sub(r"'(?:[^']|'')*'", "''", stmt)):
+        return "Only this company's own database can be queried."
+    return None
+
+
 def run_sql(sql: str) -> dict:
     stmt = sql.strip().rstrip(";").strip()
-    if not re.match(r"^(select|with)\b", stmt, re.I) or ";" in stmt or _FORBIDDEN.search(stmt):
-        return {"error": "Only a single read-only SELECT statement is allowed."}
-    if _OTHER_DB.search(re.sub(r"'(?:[^']|'')*'", "''", stmt)):
-        return {"error": "Only this company's own database can be queried."}
+    if problem := _sql_problem(stmt):
+        return {"error": problem}
     conn = connect()
     try:
         cur = conn.cursor()
@@ -205,6 +212,101 @@ def daily_briefing() -> dict:
     return {"briefing": path.read_text()} if path.exists() else {"note": "No briefing generated yet."}
 
 
+EXPORT_MAX_ROWS = 50000
+# Tools whose data can be exported (not charts, internet pages or the export itself).
+# Ready-made master data lists, so the model never has to guess B1 column names for them.
+LISTS = {
+    "customers": "SELECT CardCode AS [Code], CardName AS [Name], Phone1 AS [Phone], E_Mail AS [Email], City, Country, "
+                 "Currency, Balance AS [Balance still owed], OrdersBal AS [Open orders], CreditLine AS [Credit limit], "
+                 "CASE WHEN frozenFor = 'Y' THEN 'Inactive' ELSE 'Active' END AS [Status], CreateDate AS [Created] "
+                 "FROM OCRD WHERE CardType = 'C' ORDER BY CardCode",
+    "suppliers": "SELECT CardCode AS [Code], CardName AS [Name], Phone1 AS [Phone], E_Mail AS [Email], City, Country, "
+                 "Currency, Balance AS [Balance we owe], OrdersBal AS [Open orders], "
+                 "CASE WHEN frozenFor = 'Y' THEN 'Inactive' ELSE 'Active' END AS [Status], CreateDate AS [Created] "
+                 "FROM OCRD WHERE CardType = 'S' ORDER BY CardCode",
+    "items": "SELECT I.ItemCode AS [Code], I.ItemName AS [Name], G.ItmsGrpNam AS [Group], I.InvntryUom AS [Unit], "
+             "I.OnHand AS [On hand], I.IsCommited AS [Committed], I.OnOrder AS [On order], "
+             "I.OnHand - I.IsCommited AS [Available], I.AvgPrice AS [Average cost], I.LastPurPrc AS [Last purchase price], "
+             "I.CardCode AS [Preferred supplier], CASE WHEN I.frozenFor = 'Y' THEN 'Inactive' ELSE 'Active' END AS [Status] "
+             "FROM OITM I LEFT JOIN OITB G ON G.ItmsGrpCod = I.ItmsGrpCod ORDER BY I.ItemCode",
+}
+EXPORTABLE = ("sales_analysis", "reorder_report", "critical_alerts", "stock_summary", "search_items", "item_details",
+              "sales_history", "transaction_anomalies", "finance_analysis", "executive_summary", "daily_briefing",
+              "market_watch", "fx_rates")
+
+
+def _result_sheets(result: dict) -> dict[str, pd.DataFrame]:
+    """Any tool result as sheets: its figures on a Summary sheet, each list of rows on a sheet of its own."""
+    summary, sheets = [], {}
+
+    def walk(value, path: str) -> None:
+        if isinstance(value, dict):
+            for k, v in value.items():
+                if not str(k).startswith("_"):
+                    walk(v, f"{path} {k}".strip())
+        elif isinstance(value, list) and value and all(isinstance(r, dict) for r in value):
+            sheets[{"rows": "Lines", "items": "Items"}.get(path, path.replace("_", " "))] = pd.json_normalize(value)
+        elif isinstance(value, list) and not value:
+            summary.append({"Figure": path.replace("_", " "), "Value": "(none)"})
+        elif isinstance(value, list):
+            summary.append({"Figure": path.replace("_", " "), "Value": ", ".join(map(str, value))})
+        else:
+            summary.append({"Figure": path.replace("_", " "), "Value": value})
+
+    walk(result, "")
+    return ({"Summary": pd.DataFrame(summary)} if summary else {}) | sheets
+
+
+def export_excel(title: str, tool: str = "", arguments: dict | None = None, sql: str = "") -> dict:
+    """Excel download of a report (re-run with the same arguments) or of a read-only SELECT (up to 50,000 rows)."""
+    arguments = dict(arguments or {})
+    if tool in LISTS:
+        sql = LISTS[tool]
+    if sql:
+        stmt = sql.strip().rstrip(";").strip()
+        if problem := _sql_problem(stmt):
+            return {"error": problem}
+        try:
+            conn = connect()
+            try:
+                cur = conn.cursor()
+                cur.execute(stmt)
+                cols = [c[0] for c in cur.description]
+                rows = cur.fetchmany(EXPORT_MAX_ROWS + 1)
+            finally:
+                conn.close()
+        except Exception as e:
+            return {"error": str(e).split("DDBC Error: ")[-1][:500],
+                    "note": "This query failed. Do not run it again unchanged: fix it once, or tell the user what you could not get."}
+        df = pd.DataFrame.from_records(rows[:EXPORT_MAX_ROWS], columns=cols)
+        df = df.map(lambda v: float(v) if type(v).__name__ == "Decimal" else v)
+        link = excel_link(title, {title[:31] or "Data": df}, title=title,
+                          subtitle=f"{len(df):,} rows" + (f" (first {EXPORT_MAX_ROWS:,} only)" if len(rows) > EXPORT_MAX_ROWS else ""))
+        return {"_display": link + "\n", "rows": len(df), "columns": cols, "truncated": len(rows) > EXPORT_MAX_ROWS,
+                "instruction": "The download link is already shown to the user. Say in one line what the file contains."}
+    if tool not in EXPORTABLE:
+        return {"error": f"Use tool = one of: {', '.join(list(LISTS) + list(EXPORTABLE))}, or give sql."}
+    fn = TOOLS[tool][0]
+    if "limit" in TOOLS[tool][2]:
+        arguments["limit"] = MAX_ROWS  # the file gets every row the report allows, not the 20 used in chat
+    result = fn(**arguments)
+    if isinstance(result, dict) and result.get("error"):
+        return result
+    if tool == "sales_analysis":  # it makes its own, fuller workbook
+        m = re.search(r"📥 .*", result.get("_display", ""))
+        if not m:
+            return {"error": "The sales Excel file could not be made this time.", "note": result.get("note")}
+        return {"_display": m.group(0) + "\n", "instruction": "The download link is already shown to the user. "
+                "Say in one line that it holds the full sales analysis."}
+    sheets = _result_sheets(result if isinstance(result, dict) else {"rows": result})
+    if not sheets:
+        return {"error": "That report has no data to export."}
+    about = ", ".join(f"{k.replace('_', ' ')}: {v}" for k, v in arguments.items() if k != "limit" and v not in ("", None))
+    return {"_display": excel_link(title, sheets, title=title, subtitle=tool.replace("_", " ").capitalize() + (f" ({about})" if about else "")) + "\n",
+            "sheets": {k: len(v) for k, v in sheets.items()},
+            "instruction": "The download link is already shown to the user. Say in one line what the file contains."}
+
+
 TOOLS = {
     "stock_projection_chart": (stock_projection_chart, "CHART: week-by-week projected stock for one item with incoming deliveries, safety stock, reorder point, lead time and run-out date. Use when asked to show/graph/visualise an item's stock or why it runs out.", {
         "item_code": {"type": "string", "description": "Exact B1 item code"},
@@ -268,11 +370,18 @@ TOOLS = {
         "date_to": {"type": "string", "description": "Optional end: YYYY-MM-DD, YYYY-MM or YYYY (YYYY-MM = whole month). Empty = today"},
         "customer": {"type": "string", "description": "Optional customer code or part of the name"},
     }),
+    "export_excel": (export_excel, "Make an Excel (.xlsx) file the user can download. Use whenever the user asks for Excel, a spreadsheet, a download, a file, or to export data, including 'that' / 'the table above': re-create it with the tool (and arguments) or SELECT that produced it. The download link is shown to the user automatically; never write a link yourself.", {
+        "title": {"type": "string", "description": "Short file name, e.g. Reorder list warehouse 01"},
+        "tool": {"type": "string", "description": "What to export. Ready-made lists: customers, suppliers, items (all of them, "
+                 "with balances / stock). Or a report: " + ", ".join(EXPORTABLE)},
+        "arguments": {"type": "object", "description": "That report's arguments, e.g. {\"status\": \"REORDER\"}; empty for none"},
+        "sql": {"type": "string", "description": "Only when no ready-made list or report fits: one read-only SELECT, up to 50,000 rows (filter documents with CANCELED = 'N')"},
+    }),
     "run_sql": (run_sql, "Run one read-only T-SQL SELECT against the live B1 database (max 200 rows). Only use when the other tools cannot answer (never for sales reports: use sales_analysis). Filter documents with CANCELED = 'N'.", {
         "sql": {"type": "string", "description": "A single SELECT statement"},
     }),
 }
-REQUIRED = {"stock_projection_chart": ["item_code"], "custom_chart": ["title", "chart_type", "labels", "values"], "web_search": ["query"], "read_web_page": ["url"], "search_items": ["text"], "item_details": ["item_code"], "sales_history": ["item_code"], "run_sql": ["sql"]}
+REQUIRED = {"stock_projection_chart": ["item_code"], "custom_chart": ["title", "chart_type", "labels", "values"], "web_search": ["query"], "read_web_page": ["url"], "search_items": ["text"], "item_details": ["item_code"], "sales_history": ["item_code"], "run_sql": ["sql"], "export_excel": ["title"]}
 
 TOOL_SCHEMAS = [
     {"type": "function", "function": {"name": name, "description": desc,

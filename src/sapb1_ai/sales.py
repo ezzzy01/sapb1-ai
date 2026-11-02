@@ -6,13 +6,15 @@ Without this, "sales analysis" questions made the model build the report from ra
 """
 
 import datetime as dt
+import logging
 import re
 
 import pandas as pd
 
 from .db import query
+from .export import excel_link
 
-MAX_INVOICE_ROWS = 30
+MAX_INVOICE_ROWS = 30  # in the chat; the Excel download has every document
 TOP = 10
 
 # CANCELED: 'N' normal, 'Y' cancelled original, 'C' the cancellation document; only 'N' counts.
@@ -159,8 +161,16 @@ def sales_analysis(date_from: str = "", date_to: str = "", customer: str = "") -
         out.append(f"| {d.DocType} | {d.DocNum} | {d.DocDate:%Y-%m-%d} | {d.CardName} | {_money(d.NetTotal)} | {_money(d.VatSum)} | "
                    f"{_money(d.DocTotal)} | {_money(d.balance)} | {status} |")
 
+    try:
+        link = _excel(title, currency, kpi, month, cust, item, docs, overdue, d_from, d_to, customer)
+        out[1:1] = ["", link]
+    except Exception:  # the report in the chat matters more than the download
+        logging.getLogger("uvicorn.error").exception("Sales analysis Excel export failed")
+        link = None
+
     return {
         "_display": "\n".join(out) + "\n",
+        "excel_download": "included above the tables" if link else "not available this time",
         "period": [str(d_from), str(d_to)], "customer_filter": customer, "currency": currency, "key_figures": kpi,
         "by_month": [{"month": m, "invoices": int(r.n), "net_sales": round(r.net, 2)} for m, r in month.iterrows()],
         "top_customers": [{"customer": r["name"], "net_sales": round(r.net, 2), "share_pct": round(r.net / net * 100, 1) if net else None,
@@ -170,5 +180,43 @@ def sales_analysis(date_from: str = "", date_to: str = "", customer: str = "") -
                        "margin_pct": round(r.gp / r.net * 100, 1) if r.net else None} for _, r in item.head(5).iterrows()],
         "instruction": "The full report with all tables is already shown to the user. Do not repeat the tables or call more tools "
                        "for it. Add only 3-5 short insights (top customer, top item, margin, what is still to be paid or overdue, "
-                       "trend) using these numbers exactly; do not calculate new ones.",
+                       "trend) using these numbers exactly; do not calculate new ones. If an Excel download is included, mention it in one "
+                       "short line; never write or invent a link yourself.",
     }
+
+
+def _excel(title, currency, kpi, month, cust, item, docs, overdue, d_from, d_to, customer) -> str:
+    """The whole report as a workbook: key figures, by month / customer / item, and every document (not only 30)."""
+    money = ("Net sales", "Still to be paid", "Gross profit", "Net", "Tax", "Total")
+    labels = {
+        "invoices": "Invoices", "credit_memos": "Credit memos", "gross_invoiced_excl_tax": "Invoiced (excl. tax)",
+        "credit_memos_excl_tax": "Less credit memos", "net_sales_excl_tax": "Net sales", "tax": "Tax charged",
+        "total_incl_tax": "Total incl. tax", "gross_profit": "Gross profit", "margin_pct": "Margin %",
+        "average_invoice_excl_tax": "Average invoice (excl. tax)", "open_invoices": "Open invoices",
+        "outstanding": "Still to be paid", "overdue_invoices": "Overdue invoices", "overdue_amount": "Overdue amount",
+    }
+    key = pd.DataFrame([{"Figure": "Report", "Value": title}, {"Figure": "Currency", "Value": currency}]
+                       + [{"Figure": labels[k], "Value": v} for k, v in kpi.items()])
+    by_month = month.reset_index().rename(columns={"m": "Month", "n": "Invoices", "net": "Net sales"})
+    by_cust = cust.reset_index().rename(columns={"CardCode": "Customer code", "name": "Customer", "n": "Invoices",
+                                                 "net": "Net sales", "open": "Still to be paid"})
+    by_item = item.reset_index().rename(columns={"ItemCode": "Item code", "name": "Item", "qty": "Qty",
+                                                 "net": "Net sales", "gp": "Gross profit"})
+    by_item["Margin %"] = (by_item["Gross profit"] / by_item["Net sales"] * 100).where(by_item["Net sales"] != 0).round(1)
+    status = pd.Series("Closed", index=docs.index).mask(docs.DocStatus == "O", "Open").mask(overdue, "Overdue")
+    documents = (docs.assign(Status=status)
+                 .sort_values(["DocDate", "DocNum"], ascending=False)
+                 [["DocType", "DocNum", "DocDate", "DocDueDate", "CardCode", "CardName", "NetTotal", "VatSum", "DocTotal",
+                   "balance", "Status"]]
+                 .rename(columns={"DocType": "Type", "DocNum": "No.", "DocDate": "Date", "DocDueDate": "Due date",
+                                  "CardCode": "Customer code", "CardName": "Customer", "NetTotal": "Net", "VatSum": "Tax",
+                                  "DocTotal": "Total", "balance": "Still to be paid"}))
+    name = f"Sales_analysis_{d_from:%Y%m%d}-{d_to:%Y%m%d}" + (f"_{customer}" if customer else "")
+    period = f"{d_from:%d %b %Y} to {d_to:%d %b %Y}" + (f" · customer: {customer}" if customer else "") + f" · amounts in {currency}, net = excluding tax"
+    return excel_link(name, {"Key figures": key, "By month": by_month, "By customer": by_cust, "By item": by_item,
+                             "Invoices": documents}, money_cols=money, title="Sales analysis by invoice", subtitle=period,
+                      charts=[{"sheet": "By month", "category": "Month", "value": "Net sales", "title": "Net sales by month"},
+                              {"sheet": "By customer", "category": "Customer", "value": "Net sales", "type": "bar", "top": 10,
+                               "title": "Top customers by net sales"},
+                              {"sheet": "By item", "category": "Item", "value": "Net sales", "type": "bar", "top": 10,
+                               "title": "Top items by net sales"}])

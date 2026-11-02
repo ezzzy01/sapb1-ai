@@ -1,15 +1,11 @@
-"""Puts SAP B1 AI on the shared chat site (Open WebUI), one entry per company in the model menu.
+"""Sets up each company's own chat site (Open WebUI, one container per company; see site.py and portal.py).
 
-The model menu at the top of the chat is the company selector. Each company stays separate behind it: its own chat
-service, SQL login and data. On the site:
-  register  (./company.sh, site level) one connection per started company to its own chat service, one group per
-            company (with that company preselected for its members), the company's menu entry readable only by that
-            group (Open WebUI hides it from everyone else and refuses chats with it), and the company names for the
-            Company dropdown on the login page (webui/loader.js). The site-wide pop-up and suggestions carry no
-            company data.
-  publish   (nightly, per company) the company's warning line and suggested questions, shown on the start page
-            while that company is selected.
-Changes are written with Open WebUI's own code inside its container, so they follow its rules and schema.
+People sign in once on the shared sign-in page and are sent to the company they chose; each company's site has its own
+database, so chats, accounts and files never mix. On a company's site:
+  register  (./company.sh) its one connection, to its own chat service only; its group (people get it from the sign-in,
+            X-Sapb1-Groups) with the company preselected; and the company's model, readable only by that group.
+  publish   (nightly, per company) the company's warning line and suggested questions on its start page.
+Changes are written with Open WebUI's own code inside the company's container, so they follow its rules and schema.
 """
 
 import json
@@ -19,12 +15,14 @@ import sys
 
 from dotenv import dotenv_values
 
-from .company import ROOT
+from .company import COMPANY, ROOT
 from .sync import DATA_DIR
 
-CONTAINER = os.getenv("WEBUI_CONTAINER", "sapb1-ai-webui")
 MODEL_ID = os.getenv("AGENT_MODEL_ID", "sapb1-stock-assistant")
-LOGIN_COMPANIES = ROOT / "webui" / "companies.json"  # served at /static/sapb1/companies.json
+
+
+def container(cid: str) -> str:
+    return f"sapb1-ai-webui-{cid}"
 
 # Site-wide start-page suggestions: generic, because everyone sees them whatever company they work in.
 GENERIC_SUGGESTIONS = [
@@ -78,14 +76,16 @@ async def register():
         "openai.api_base_urls": [c["url"] for c in cos], "openai.api_keys": [c["key"] for c in cos],
         "openai.api_configs": {str(i): {"enable": True, "connection_type": "external", "model_ids": [c["model_id"]]}
                                for i, c in enumerate(cos)},
-        "ui.banners": [], "ui.prompt_suggestions": req["suggestions"], "ui.default_models": "",
+        "ui.banners": [], "ui.prompt_suggestions": req["suggestions"],
+        "ui.default_models": cos[0]["model_id"] if len(cos) == 1 else "",
     })
-    admin = next(u for u in (await Users.get_users())["users"] if u.role == "admin")
+    # A new company's site has no accounts until the first sign-in; its model and group then belong to the setup.
+    owner = next((u.id for u in (await Users.get_users())["users"] if u.role == "admin"), "sapb1-ai-setup")
     out = []
     for c in cos:
         group = await Groups.get_group_by_name(c["name"])
         if group is None:
-            group = await Groups.insert_new_group(admin.id, GroupForm(
+            group = await Groups.insert_new_group(owner, GroupForm(
                 name=c["name"], description=f"People who may use SAP B1 AI for {c['name']} ({c['database']})"))
         # Members log in with their company already selected (someone in several groups gets the oldest group's).
         data = group.data or {}
@@ -98,7 +98,7 @@ async def register():
         if model is None:
             await Models.insert_new_model(ModelForm(
                 id=c["model_id"], base_model_id=None, name=c["name"], params={}, access_grants=grants,
-                meta={"description": f"SAP B1 AI for {c['name']}"}), admin.id)
+                meta={"description": f"SAP B1 AI for {c['name']}"}), owner)
         else:
             await Models.update_model_by_id(c["model_id"], form(model, name=c["name"], access_grants=grants))
         out.append(c["name"])
@@ -120,8 +120,8 @@ asyncio.run({"register": register, "publish": publish}[req["action"]]())
 """
 
 
-def _site(request: dict) -> dict:
-    run = subprocess.run(["docker", "exec", "-i", "-w", "/app/backend", CONTAINER, "sh", "-c",
+def _site(request: dict, name: str) -> dict:
+    run = subprocess.run(["docker", "exec", "-i", "-w", "/app/backend", name, "sh", "-c",
                           "WEBUI_SECRET_KEY=$(cat .webui_secret_key) python3 -c \"$0\"", _SITE_SCRIPT],
                          input=json.dumps(request), capture_output=True, text=True, check=True)
     return json.loads(run.stdout.strip().splitlines()[-1])
@@ -167,28 +167,22 @@ def suggestions(alerts: dict) -> list[dict]:
 def publish() -> None:
     alerts = json.loads((DATA_DIR / "alerts.json").read_text())
     result = _site({"action": "publish", "model_id": MODEL_ID, "description": description(alerts),
-                    "suggestions": suggestions(alerts)})
+                    "suggestions": suggestions(alerts)}, container(COMPANY))
     print("Start page updated for this company" if result["published"]
           else f"{MODEL_ID} is not on the chat site yet; run ./company.sh start for this company")
 
 
 def register(company_ids: list[str]) -> None:
-    """Put the given (started) companies on the chat site; companies left out disappear from its menu."""
-    companies = []
+    """Set up each given (started) company on its own site: only its own chat service, group and model."""
     for cid in company_ids:
         env = dotenv_values(ROOT / "companies" / cid / "company.env")
-        companies.append({"id": cid, "name": env["COMPANY_NAME"], "database": env["SAPB1_DB"],
-                          "model_id": env["AGENT_MODEL_ID"], "key": env["AGENT_API_KEY"],
-                          "url": f"http://host.docker.internal:{env['AGENT_PORT']}/v1"})
-    result = _site({"action": "register", "companies": companies, "suggestions": GENERIC_SUGGESTIONS})
-    # Names only. The login page is public, so anyone who opens it sees them; choosing a company someone isn't
-    # allowed to use opens nothing.
-    LOGIN_COMPANIES.write_text(json.dumps(sorted(({"name": c["name"], "model": c["model_id"]} for c in companies),
-                                                 key=lambda c: c["name"].lower()), indent=1))
-    print("On the chat site: " + (", ".join(result["companies"]) or "no companies"))
-    if result["connections_changed"]:
-        subprocess.run(["docker", "restart", CONTAINER], check=True, capture_output=True)
-        print("Chat site restarted to load the company list")
+        c = {"id": cid, "name": env["COMPANY_NAME"], "database": env["SAPB1_DB"], "model_id": env["AGENT_MODEL_ID"],
+             "key": env["AGENT_API_KEY"], "url": f"http://host.docker.internal:{env['AGENT_PORT']}/v1"}
+        result = _site({"action": "register", "companies": [c], "suggestions": GENERIC_SUGGESTIONS}, container(cid))
+        print(f"Chat site ready: {c['name']}")
+        if result["connections_changed"]:
+            subprocess.run(["docker", "restart", container(cid)], check=True, capture_output=True)
+            print(f"  {c['name']} site restarted to load its connection")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,13 @@
+[Unit]
+Description=SAP B1 AI: shared sign-in page for every company's chat site
+After=network-online.target
+
+[Service]
+WorkingDirectory=%h/sapb1-ai
+Environment=PYTHONWARNINGS=ignore
+ExecStart=%h/.local/bin/uv run --frozen uvicorn sapb1_ai.portal:app --host 0.0.0.0 --port 8090 --no-access-log
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
