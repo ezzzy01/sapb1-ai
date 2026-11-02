@@ -33,6 +33,8 @@ MAX_TOOL_ROUNDS = 6
 MAX_TOKENS_PER_STEP = 2048
 # Generous: loading the model into the GPU alone can take 35-75 s, and the GPU serves one request at a time.
 STEP_TIMEOUT_S = 300
+# One lookup (SQL, report, Excel file) may take this long; then the person gets an answer instead of a stuck chat.
+TOOL_TIMEOUT_S = int(os.getenv("TOOL_TIMEOUT_S", "120"))
 
 _modelfile = (Path(__file__).resolve().parents[2] / "ollama" / "Modelfile").read_text()
 SYSTEM_PROMPT = re.search(r'SYSTEM """(.*?)"""', _modelfile, re.S).group(1).strip() + """
@@ -121,13 +123,68 @@ FINANCE_WORDS = re.compile(r"\b(cash|invoices?|pay|paid|payments?|owes?|owed|deb
                            r"revenue|journals?|bank|credit notes?|overcharg\w*|duplicates?|fraud|budget|expenses?|bayar|hutang)\b", re.I)
 
 
-def _wants_chart(messages: list[dict]) -> bool:
-    """Charts only when the latest user message asks for one; otherwise the chart tools are not offered at all."""
+EXCEL_WORDS = re.compile(r"\b(excel|xlsx?|spreadsheets?|csv|download|export|exported|eksport|muat\s*turun|hamparan|"
+                         r"lembaran\s*kerja)\b", re.I)
+
+
+def _last_user_text(messages: list[dict]) -> str:
     last = next((m for m in reversed(messages) if m.get("role") == "user"), {})
     content = last.get("content")
     if isinstance(content, list):
         content = " ".join(p.get("text", "") for p in content if p.get("type") == "text")
-    return bool(CHART_WORDS.search(content or ""))
+    return content or ""
+
+
+def _wants_chart(messages: list[dict]) -> bool:
+    """Charts only when the latest user message asks for one; otherwise the chart tools are not offered at all."""
+    return bool(CHART_WORDS.search(_last_user_text(messages)))
+
+
+def _wants_excel(messages: list[dict]) -> bool:
+    """The latest user message asks for a file: then an answer only counts once a real file has been made."""
+    return bool(EXCEL_WORDS.search(_last_user_text(messages)))
+
+
+_NOTE_LINE = re.compile(r"^> (🔎|⚠️|🛑) .*$|^> \*Ask .*$", re.M)
+_DOWNLOAD = re.compile(r"📥 \*\*\[Download Excel: [^\]]*\]\([^)]*\)\*\*[^\n]*")
+_DATA_IMAGE = re.compile(r"!\[([^\]]*)\]\(data:image/[^)]*\)")
+
+
+def _clean_history(text: str) -> str:
+    """Earlier answers as the model sees them: without lookup notes, warnings, download links or chart images, so it
+    cannot copy them as text (it once wrote a fake "Preparing your Excel file" note instead of making the file) and
+    long chats with charts stay small."""
+    text = _NOTE_LINE.sub("", text)
+    text = _DOWNLOAD.sub("[An Excel file was given here. If the user asks for it again, make a new one with export_excel.]", text)
+    text = _DATA_IMAGE.sub(lambda m: f"[Chart shown: {m.group(1)}]", text)
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
+
+
+_SALES_HEADING = re.compile(r"^## Sales analysis by invoice: (\d{2} \w{3} \d{4}) to (\d{2} \w{3} \d{4})(?: \(customer: (.+)\))?\s*$", re.M)
+_NOTE = re.compile(r"^> 🔎 \*(.+?)…\*", re.M)
+# Reports that need no arguments, so they can be made again from their lookup note alone.
+_ARGLESS = ("stock_summary", "critical_alerts", "reorder_report", "transaction_anomalies", "finance_analysis",
+            "executive_summary", "daily_briefing", "market_watch", "fx_rates")
+
+
+def _recent_report(messages: list[dict]) -> tuple[str, dict, str] | None:
+    """The newest report shown in this chat that can be made again exactly: (tool, arguments, plain name)."""
+    from datetime import datetime
+    for m in reversed(messages):
+        if m.get("role") != "assistant" or not isinstance(m.get("content"), str):
+            continue
+        text = m["content"]
+        if h := _SALES_HEADING.search(text):
+            args = {"date_from": datetime.strptime(h[1], "%d %b %Y").date().isoformat(),
+                    "date_to": datetime.strptime(h[2], "%d %b %Y").date().isoformat()}
+            if h[3]:
+                args["customer"] = h[3]
+            return "sales_analysis", args, f"sales analysis ({h[1]} to {h[2]}{', ' + h[3] if h[3] else ''})"
+        names = {note: tool for tool, note in LOOKUP_NOTES.items() if tool in _ARGLESS}
+        for note in reversed(_NOTE.findall(text)):
+            if note in names:
+                return names[note], {}, note.lower()
+    return None
 
 
 def _is_task(messages: list[dict]) -> bool:
@@ -156,8 +213,10 @@ def _prepare(messages: list[dict], use_tools: bool) -> list[dict]:
             content = "\n".join(p.get("text", "") for p in content if p.get("type") == "text")
         if m.get("role") == "system":
             out[0]["content"] += "\n\n" + (content or "")
-        elif m.get("role") in ("user", "assistant"):
-            out.append({"role": m["role"], "content": content or ""})
+        elif m.get("role") == "assistant":
+            out.append({"role": "assistant", "content": _clean_history(content or "")})
+        elif m.get("role") == "user":
+            out.append({"role": "user", "content": content or ""})
     return out
 
 
@@ -208,6 +267,8 @@ async def _run(messages: list[dict], use_tools: bool):
     answered = False
     tools = TOOL_SCHEMAS if _wants_chart(messages) else [s for s in TOOL_SCHEMAS if not s["function"]["name"].endswith("_chart")]
     done_calls: dict[str, str] = {}  # same tool + same arguments -> earlier result, so a lookup is never run twice
+    # Asked for Excel: hold the model's text back until a real file exists, so it can never just claim one.
+    excel_needed, excel_made, excel_nudged = use_tools and _wants_excel(messages), False, False
     async with httpx.AsyncClient(timeout=httpx.Timeout(STEP_TIMEOUT_S)) as client:
         for step in range(MAX_TOOL_ROUNDS + 1):
             body = {"model": BASE_MODEL, "messages": msgs, "stream": True, "think": False,
@@ -220,6 +281,7 @@ async def _run(messages: list[dict], use_tools: bool):
                     "No more lookups are possible for this question. Answer now using only the tool results above. "
                     "Say briefly what you could not get, and suggest how the user can narrow the question if needed.")}]
             content, tool_calls = "", []
+            hold = excel_needed and not excel_made
             try:
                 async with client.stream("POST", f"{OLLAMA_URL}/api/chat", json=body) as r:
                     r.raise_for_status()
@@ -229,18 +291,54 @@ async def _run(messages: list[dict], use_tools: bool):
                         msg = json.loads(line).get("message", {})
                         if msg.get("content"):
                             content += msg["content"]
-                            answered = True
-                            yield msg["content"]
+                            if not hold:
+                                answered = True
+                                yield msg["content"]
                         tool_calls += msg.get("tool_calls") or []
             except httpx.TimeoutException:
                 yield ("\n\n**The AI engine is busy or still loading and did not answer in time.** "
                        "Please send your question again in a minute.")
                 return
+            if not tool_calls and hold:
+                recent = _recent_report(messages)
+                if not excel_nudged and step < MAX_TOOL_ROUNDS:
+                    # It answered without making the file: drop that answer and ask it once to make the file.
+                    excel_nudged = True
+                    log.info("Asked for Excel but no file was made; asking the model to make it")
+                    hint = (f" The latest report in this chat was {recent[0]} with arguments {json.dumps(recent[1])}; if the "
+                            "user means that one, call export_excel with tool and arguments set to it.") if recent else ""
+                    msgs.append({"role": "system", "content": (
+                        "The user asked for an Excel file and none has been made yet. Call export_excel now: tool = the "
+                        "report or ready-made list they want (with its arguments), or sql. Do not write an answer, notes or "
+                        "links yourself." + hint)})
+                    continue
+                if recent:
+                    # Still nothing: make the file of the report shown earlier ourselves, and say which one it is.
+                    tool, args, name = recent
+                    log.info("Model made no Excel file twice; making it from the earlier %s", tool)
+                    yield _lookup_note("export_excel")
+                    try:
+                        result = await asyncio.wait_for(asyncio.to_thread(
+                            call_tool, "export_excel", {"title": name[:1].upper() + name[1:], "tool": tool, "arguments": args}),
+                            TOOL_TIMEOUT_S)
+                    except TimeoutError:
+                        result = "{}"
+                    try:
+                        shown = str(json.loads(result).get("_display", ""))
+                    except ValueError:
+                        shown = ""
+                    if "Download Excel" in shown:
+                        yield (shown + f"\nThis is the Excel file of the {name} shown earlier in this chat. If you wanted "
+                               "something else, say which report or list.")
+                        return
+                yield ("I couldn't create the Excel file for this request. Please ask again and name what you want in "
+                       "the file, for example *\"Export the customer list to Excel\"* or *\"Sales analysis for October in Excel\"*.")
+                return
             if not tool_calls:
                 if not answered:
                     yield "*(No answer was generated. Please rephrase or ask again.)*"
                 return
-            msgs.append({"role": "assistant", "content": content, "tool_calls": tool_calls})
+            msgs.append({"role": "assistant", "content": "" if hold else content, "tool_calls": tool_calls})
             for tc in tool_calls:
                 fn = tc["function"]
                 args = fn.get("arguments") or {}
@@ -257,7 +355,14 @@ async def _run(messages: list[dict], use_tools: bool):
                     msgs.append({"role": "tool", "content": json.dumps({"error": "Charts are only shown when the user asks for one."}),
                                  "tool_name": fn["name"]})
                     continue
-                result = await asyncio.to_thread(call_tool, fn["name"], args)
+                started = time.monotonic()
+                try:
+                    result = await asyncio.wait_for(asyncio.to_thread(call_tool, fn["name"], args), TOOL_TIMEOUT_S)
+                except TimeoutError:
+                    result = json.dumps({"error": f"This lookup took more than {TOOL_TIMEOUT_S} seconds and was stopped. "
+                                                  "SAP may be slow or unreachable right now.",
+                                         "note": "Do not try it again now. Tell the user plainly and suggest asking again in a few minutes."})
+                log.info("Tool %s took %.1f s", fn["name"], time.monotonic() - started)  # name and time only
                 done_calls[key] = result
                 if result.startswith('{"error"'):  # tool name and error only: no figures or rows in the log
                     log.warning("Tool %s failed: %s", fn["name"], result[:300])
@@ -266,6 +371,8 @@ async def _run(messages: list[dict], use_tools: bool):
                     parsed = json.loads(result)
                 except ValueError:
                     parsed = None
+                if isinstance(parsed, dict) and "Download Excel" in str(parsed.get("_display", "")):
+                    excel_made = True
                 if isinstance(parsed, dict) and "_display" in parsed:
                     yield parsed.pop("_display") + "\n\n"
                     result = json.dumps({"shown_to_user": True, **parsed}, default=str)

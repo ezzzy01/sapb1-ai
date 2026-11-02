@@ -195,9 +195,13 @@ def _excel(title, currency, kpi, month, cust, item, docs, overdue, d_from, d_to,
         "average_invoice_excl_tax": "Average invoice (excl. tax)", "open_invoices": "Open invoices",
         "outstanding": "Still to be paid", "overdue_invoices": "Overdue invoices", "overdue_amount": "Overdue amount",
     }
-    key = pd.DataFrame([{"Figure": "Report", "Value": title}, {"Figure": "Currency", "Value": currency}]
-                       + [{"Figure": labels[k], "Value": v} for k, v in kpi.items()])
-    by_month = month.reset_index().rename(columns={"m": "Month", "n": "Invoices", "net": "Net sales"})
+    # Report and currency are in every sheet's subtitle; object dtype keeps counts as counts and amounts as amounts.
+    key = pd.DataFrame({"Figure": [labels[k] for k in kpi], "Value": pd.Series(list(kpi.values()), dtype=object)})
+    last = min(d_to, dt.date.today())
+    months = pd.period_range(d_from, last, freq="M").strftime("%Y-%m") if d_from <= last else month.index
+    month = month.reindex(months.union(month.index), fill_value=0)  # a month with no sales shows as 0, not missing
+    by_month = month.rename_axis("m").reset_index().rename(columns={"m": "Month", "n": "Invoices", "net": "Net sales"})
+    by_month["Month"] = pd.to_datetime(by_month["Month"], format="%Y-%m").dt.strftime("%b %Y")  # Jan 2025, not 2025-01
     by_cust = cust.reset_index().rename(columns={"CardCode": "Customer code", "name": "Customer", "n": "Invoices",
                                                  "net": "Net sales", "open": "Still to be paid"})
     by_item = item.reset_index().rename(columns={"ItemCode": "Item code", "name": "Item", "qty": "Qty",
@@ -213,10 +217,30 @@ def _excel(title, currency, kpi, month, cust, item, docs, overdue, d_from, d_to,
                                   "DocTotal": "Total", "balance": "Still to be paid"}))
     name = f"Sales_analysis_{d_from:%Y%m%d}-{d_to:%Y%m%d}" + (f"_{customer}" if customer else "")
     period = f"{d_from:%d %b %Y} to {d_to:%d %b %Y}" + (f" · customer: {customer}" if customer else "") + f" · amounts in {currency}, net = excluding tax"
+    k = kpi
+    margin = f"{k['margin_pct']:.1f}% margin" if k.get("margin_pct") is not None else "Margin not available"
+    overdue_note = f"{k['overdue_amount']:,.0f} overdue" if k["overdue_invoices"] else "nothing overdue"
+    summary = {
+        "tiles": [
+            {"label": f"Net sales ({currency})", "value": k["net_sales_excl_tax"],
+             "note": f"Excluding tax · {k['invoices']:,} invoices"},
+            {"label": f"Gross profit ({currency})", "value": k["gross_profit"], "note": margin},
+            {"label": f"Average invoice ({currency})", "value": k["average_invoice_excl_tax"],
+             "note": f"{k['credit_memos']:,} credit memos"},
+            {"label": f"Still to be paid ({currency})", "value": k["outstanding"],
+             "note": f"{k['open_invoices']:,} open invoices · {overdue_note}"},
+        ],
+        "charts": [
+            {"sheet": "By month", "category": "Month", "value": "Net sales", "wide": True,
+             "title": "Net sales by month", "subtitle": f"{currency}, excluding tax · best month labelled"},
+            {"sheet": "By customer", "category": "Customer", "value": "Net sales", "type": "bar", "top": 10,
+             "title": "Top 10 customers" if len(by_cust) > 10 else "Customers", "subtitle": f"Net sales, {currency}"},
+            {"sheet": "By item", "category": "Item", "value": "Net sales", "type": "bar", "top": 10,
+             "title": "Top 10 items" if len(by_item) > 10 else "Items", "subtitle": f"Net sales, {currency}"},
+        ],
+        "note": "Full figures are on the next sheets: Key figures, By month, By customer, By item and Invoices.",
+    }
     return excel_link(name, {"Key figures": key, "By month": by_month, "By customer": by_cust, "By item": by_item,
                              "Invoices": documents}, money_cols=money, title="Sales analysis by invoice", subtitle=period,
-                      charts=[{"sheet": "By month", "category": "Month", "value": "Net sales", "title": "Net sales by month"},
-                              {"sheet": "By customer", "category": "Customer", "value": "Net sales", "type": "bar", "top": 10,
-                               "title": "Top customers by net sales"},
-                              {"sheet": "By item", "category": "Item", "value": "Net sales", "type": "bar", "top": 10,
-                               "title": "Top items by net sales"}])
+                      summary=summary, bars={"By month": ("Net sales",), "By customer": ("Net sales",),
+                                             "By item": ("Net sales",)})

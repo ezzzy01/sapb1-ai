@@ -18,6 +18,7 @@ import html
 import json
 import os
 import secrets
+import string
 import sys
 import time
 import urllib.parse
@@ -125,24 +126,53 @@ def _failed(*keys: str) -> None:
 
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 
-_PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>{title} · SAP B1 AI</title>
-<style>
-body{{margin:0;min-height:100vh;display:grid;place-items:center;background:#f5f6f7;color:#1d2d3e;
-     font:15px/1.4 "72","Segoe UI",system-ui,sans-serif}}
-main{{width:min(360px,90vw);background:#fff;border-radius:12px;box-shadow:0 2px 16px rgba(0,0,0,.08);padding:32px}}
-h1{{font-size:20px;margin:0 0 4px}} p.sub{{margin:0 0 20px;color:#556b82;font-size:13px}}
-label{{display:block;font-size:13px;margin:14px 0 4px}}
-input,select{{box-sizing:border-box;width:100%;padding:9px 10px;border:1px solid #bcc3ca;border-radius:6px;font:inherit;background:#fff}}
-button{{width:100%;margin-top:22px;padding:10px;border:0;border-radius:6px;background:#0064d9;color:#fff;font:inherit;cursor:pointer}}
-.err{{margin-top:14px;color:#aa0808;font-size:13px}} .ok{{margin-top:14px;color:#256f3a;font-size:13px}}
-.foot{{margin-top:18px;font-size:12px;text-align:center}} a{{color:#0064d9}}
-</style></head><body><main>{body}</main>
-<script>try{{localStorage.removeItem("token")}}catch(e){{}}</script></body></html>"""
+_TEMPLATE = string.Template((Path(__file__).with_name("portal_page.html")).read_text())
+
+_ICONS = {
+    "company": '<path d="M3 21h18M5 21V5a2 2 0 012-2h6a2 2 0 012 2v16M15 9h2a2 2 0 012 2v10M9 7h2M9 11h2M9 15h2"/>',
+    "email": '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/>',
+    "lock": '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 018 0v4"/>',
+    "key": '<circle cx="8" cy="15" r="4"/><path d="M10.8 12.2L20 3M16 7l3 3M14 9l2 2"/>',
+    "eye": '<path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/>',
+    "chev": '<path d="M6 9l6 6 6-6"/>',
+    "err": '<circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/>',
+    "ok": '<circle cx="12" cy="12" r="10"/><path d="M8 12l3 3 5-6"/>',
+}
+
+
+def _svg(name: str, cls: str = "") -> str:
+    return (f'<svg class="{cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
+            f'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{_ICONS[name]}</svg>')
+
+
+def _messages(error: str, note: str) -> str:
+    out = ""
+    if error:
+        out += f'<div class="msg err" role="alert">{_svg("err")}<span>{html.escape(error)}</span></div>'
+    if note:
+        out += f'<div class="msg ok" role="status">{_svg("ok")}<span>{html.escape(note)}</span></div>'
+    return out
+
+
+def _input(name: str, label: str, icon: str, kind: str = "text", value: str = "", autocomplete: str = "",
+           placeholder: str = "", hint: str = "", extra: str = "") -> str:
+    reveal = kind == "password"
+    button = (f'<button type="button" class="reveal" aria-label="Show password" aria-pressed="false">{_svg("eye")}</button>'
+              if reveal else "")
+    return (f'<div class="field"><label for="{name}">{label}</label>'
+            f'<div class="control{" has-reveal" if reveal else ""}">{_svg(icon, "lead")}'
+            f'<input id="{name}" name="{name}" type="{kind}" required value="{html.escape(value)}"'
+            f' autocomplete="{autocomplete}" placeholder="{html.escape(placeholder)}" {extra}>{button}</div>'
+            + (f'<div class="hint">{hint}</div>' if hint else "") + "</div>")
+
+
+def _button(label: str, busy: str) -> str:
+    return (f'<button type="submit" class="btn" data-busy="{busy}"><span class="spinner"></span>'
+            f'<span class="label">{label}</span></button>')
 
 
 def _page(title: str, body: str, status: int = 200) -> HTMLResponse:
-    r = HTMLResponse(_PAGE.format(title=html.escape(title), body=body), status_code=status)
+    r = HTMLResponse(_TEMPLATE.substitute(title=html.escape(title), content=body), status_code=status)
     r.headers["Cache-Control"] = "no-store"
     r.headers["X-Frame-Options"] = "DENY"
     return r
@@ -152,14 +182,17 @@ def _login_page(error: str = "", email: str = "", company: str = "", note: str =
     cos = companies()
     opts = "".join(f'<option value="{html.escape(c)}"{" selected" if c == company else ""}>{html.escape(n)}</option>'
                    for c, n in sorted(cos.items(), key=lambda kv: kv[1].lower()))
-    body = f"""<h1>SAP B1 AI</h1><p class="sub">Sign in to your company</p>
+    body = f"""<h2>Welcome back</h2><p class="sub">Sign in to your company's AI assistant.</p>
+{_messages(error, note)}
 <form method="post" action="/portal/login">
-<label for="company">Company</label><select id="company" name="company" required>{opts}</select>
-<label for="email">Email</label><input id="email" name="email" type="email" autocomplete="username" required value="{html.escape(email)}">
-<label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password" required>
-<button type="submit">Sign in</button></form>
-{f'<div class="err">{html.escape(error)}</div>' if error else ''}{f'<div class="ok">{html.escape(note)}</div>' if note else ''}
-<div class="foot"><a href="/portal/password">Change password</a></div>"""
+<div class="field"><label for="company">Company</label>
+<div class="control">{_svg("company", "lead")}<select id="company" name="company" required>{opts}</select>{_svg("chev", "chev")}</div></div>
+{_input("email", "Email", "email", "email", email, "username", "name@company.com", extra="" if email else "autofocus")}
+{_input("password", "Password", "lock", "password", autocomplete="current-password", placeholder="Your password",
+        extra="autofocus" if email else "")}
+{_button("Sign in", "Signing in…")}
+</form>
+<div class="links"><a href="/portal/password">Change password</a></div>"""
     return _page("Sign in", body, status)
 
 
@@ -235,14 +268,16 @@ def password_form():
 
 
 def _password_page(error: str = "", note: str = "", status: int = 200) -> HTMLResponse:
-    body = f"""<h1>Change password</h1><p class="sub">For every company you use</p>
+    body = f"""<h2>Change password</h2><p class="sub">Your new password works for every company you use.</p>
+{_messages(error, note)}
 <form method="post" action="/portal/password">
-<label for="email">Email</label><input id="email" name="email" type="email" autocomplete="username" required>
-<label for="old">Current password</label><input id="old" name="old" type="password" autocomplete="current-password" required>
-<label for="new">New password (at least 10 characters)</label><input id="new" name="new" type="password" autocomplete="new-password" minlength="10" required>
-<button type="submit">Change password</button></form>
-{f'<div class="err">{html.escape(error)}</div>' if error else ''}{f'<div class="ok">{html.escape(note)}</div>' if note else ''}
-<div class="foot"><a href="/portal/login">Back to sign in</a></div>"""
+{_input("email", "Email", "email", "email", autocomplete="username", placeholder="name@company.com", extra="autofocus")}
+{_input("old", "Current password", "lock", "password", autocomplete="current-password", placeholder="Your current password")}
+{_input("new", "New password", "key", "password", autocomplete="new-password", placeholder="At least 10 characters",
+        hint="Use at least 10 characters. A short sentence is easy to remember and hard to guess.", extra='minlength="10"')}
+{_button("Change password", "Saving…")}
+</form>
+<div class="links"><a href="/portal/login">Back to sign in</a></div>"""
     return _page("Change password", body, status)
 
 
