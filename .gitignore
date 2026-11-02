@@ -20,3 +20,9 @@ backups/
 companies/
 # Company names for the login page, written by ./company.sh (private)
 webui/companies.json
+
+# Excel downloads made by the chat (company data, deleted after 24 h)
+exports/
+
+# Sign-in accounts, session key and generated site files (company names): private, never committed
+site/

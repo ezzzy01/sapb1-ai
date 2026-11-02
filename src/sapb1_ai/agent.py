@@ -12,12 +12,14 @@ import os
 import re
 import time
 import uuid
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
 
+from .export import cleanup as cleanup_exports
 from .tools import TOOL_SCHEMAS, call_tool
 
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
@@ -50,6 +52,8 @@ they want the result. So:
 - If a word they use is ambiguous (e.g. "this month", "cash"), pick the common meaning, say which in a few words, and answer.
 For any sales report, sales analysis, revenue or invoices-issued question call sales_analysis once (with dates or a
 customer if they gave them); it shows the full report itself, so only add a few insights after it.
+When they ask for Excel, a spreadsheet, a file, a download or an export, call export_excel (it reruns the report or SELECT
+behind the data, so the file has every row). Never say you cannot make files, and never write download links yourself.
 For "how is the business / what should I know" questions use executive_summary or daily_briefing. For cash, who owes us,
 paying suppliers, margins and lost customers use finance_analysis; for overpaying, duplicate invoices, pricing errors,
 controls or fraud use transaction_anomalies. Its money_lost is purchases paid above the usual price plus sales made below
@@ -75,8 +79,27 @@ You have tools that read the company's B1 data. Use them for every question abou
   orders and the action.
 - Answer from tool results only. If a tool returns an error, say so plainly. Never repeat a lookup that failed."""
 
-app = FastAPI(title=MODEL_NAME)
 log = logging.getLogger("uvicorn.error")
+
+
+async def _cleanup_exports_hourly() -> None:
+    """Excel downloads expire even when nobody exports anything new."""
+    while True:
+        try:
+            await asyncio.to_thread(cleanup_exports)
+        except Exception:
+            log.exception("Cleaning up old Excel downloads failed")
+        await asyncio.sleep(3600)
+
+
+@asynccontextmanager
+async def _lifespan(_app):
+    task = asyncio.create_task(_cleanup_exports_hourly())
+    yield
+    task.cancel()
+
+
+app = FastAPI(title=MODEL_NAME, lifespan=_lifespan)
 
 
 def _check_key(authorization: str | None) -> None:
@@ -141,7 +164,7 @@ def _prepare(messages: list[dict], use_tools: bool) -> list[dict]:
 LOOKUP_NOTES = {
     "stock_summary": "Checking the stock overview", "critical_alerts": "Checking what could stop operations",
     "reorder_report": "Checking what needs ordering", "search_items": "Finding the item", "item_details": "Looking up the item",
-    "sales_history": "Looking at past sales", "sales_analysis": "Building the sales analysis", "run_sql": "Looking it up in SAP", "market_watch": "Reading the market watch",
+    "sales_history": "Looking at past sales", "sales_analysis": "Building the sales analysis", "export_excel": "Preparing the Excel file", "run_sql": "Looking it up in SAP", "market_watch": "Reading the market watch",
     "transaction_anomalies": "Checking transactions for red flags", "finance_analysis": "Checking cash, payments and margins",
     "daily_briefing": "Reading today's briefing", "executive_summary": "Checking the business overview",
     "web_search": "Searching the internet", "read_web_page": "Reading a web page", "fx_rates": "Checking exchange rates",
@@ -236,6 +259,8 @@ async def _run(messages: list[dict], use_tools: bool):
                     continue
                 result = await asyncio.to_thread(call_tool, fn["name"], args)
                 done_calls[key] = result
+                if result.startswith('{"error"'):  # tool name and error only: no figures or rows in the log
+                    log.warning("Tool %s failed: %s", fn["name"], result[:300])
                 # Charts: show the image to the user directly; the model only gets the summary.
                 try:
                     parsed = json.loads(result)
