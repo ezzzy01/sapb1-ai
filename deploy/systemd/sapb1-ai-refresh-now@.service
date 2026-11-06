@@ -1,0 +1,16 @@
+[Unit]
+Description=SAP B1 AI: pull the latest B1 data now for company %i (the dashboard's "Refresh data"; no pushes)
+# Not started while the nightly refresh of the same company runs (checked in dashboard.py).
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/sapb1-ai
+Environment=SAPB1_COMPANY=%i
+Environment=PYTHONWARNINGS=ignore
+ExecStart=%h/.local/bin/uv run --frozen python -m sapb1_ai.sync
+ExecStart=%h/.local/bin/uv run --frozen python -m sapb1_ai.forecast
+ExecStart=%h/.local/bin/uv run --frozen python -m sapb1_ai.alerts --no-push
+ExecStart=-%h/.local/bin/uv run --frozen python -m sapb1_ai.anomalies
+ExecStart=-%h/.local/bin/uv run --frozen python -m sapb1_ai.finance
+ExecStart=-%h/.local/bin/uv run --frozen python -m sapb1_ai.webui
+ExecStart=-%h/.local/bin/uv run --frozen python -m sapb1_ai.dashboard

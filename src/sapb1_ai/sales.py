@@ -75,7 +75,7 @@ def _pct(part: float, whole: float) -> str:
     return f"{part / whole * 100:.1f}%" if whole else "-"
 
 
-def sales_analysis(date_from: str = "", date_to: str = "", customer: str = "") -> dict:
+def sales_analysis(date_from: str = "", date_to: str = "", customer: str = "", charts: bool = False) -> dict:
     today = dt.date.today()
     d_from = _parse_date(date_from, end=False)
     d_to = _parse_date(date_to, end=True) or today
@@ -169,6 +169,14 @@ def sales_analysis(date_from: str = "", date_to: str = "", customer: str = "") -
         logging.getLogger("uvicorn.error").exception("Sales analysis Excel export failed")
         link = None
 
+    if str(charts).strip().lower() in ("true", "1", "yes"):  # dashboard: the charts go right under the key figures
+        try:
+            images = _charts(month, cust, item, currency, d_from, d_to, customer, net)
+            at = next(i for i, line in enumerate(out) if line.startswith("### ") and i > out.index("### Key figures"))
+            out[at:at] = images
+        except Exception:
+            logging.getLogger("uvicorn.error").exception("Sales dashboard charts failed")
+
     return {
         "_display": "\n".join(out) + "\n",
         "excel_download": "included above the tables" if link else "not available this time",
@@ -186,9 +194,48 @@ def sales_analysis(date_from: str = "", date_to: str = "", customer: str = "") -
     }
 
 
+def _charts(month, cust, item, currency, d_from, d_to, customer, net) -> list[str]:
+    """Three charts for the chat: net sales by month, top customers, top items (each value written exactly)."""
+    from .charts import BLUE, OTHER, _bars_left, _figure, _hbar, _image, _month_ticks
+    scope = f"{d_from:%d %b %Y} to {d_to:%d %b %Y}" + (f" · customer: {customer}" if customer else "")
+    shown = []
+    last = min(d_to, dt.date.today())
+    idx = pd.period_range(d_from, last, freq="M") if d_from <= last else pd.PeriodIndex([], freq="M")
+    m = month.net.copy()
+    m.index = pd.PeriodIndex(m.index, freq="M")
+    m = m.reindex(idx.union(m.index), fill_value=0)
+    if len(m):
+        fig, ax = _figure(3.6, "Net sales by month", f"{currency}, excluding tax, after credit memos · {scope}")
+        colours = [BLUE] * len(m)
+        ax.bar(range(len(m)), m.values, color=colours, width=0.62)
+        _month_ticks(ax, m.index)
+        ax.yaxis.set_visible(False)
+        ax.axhline(0, color="#e4e8ec", linewidth=1)
+        best = int(m.values.argmax())
+        for i, v in enumerate(m.values):
+            if v and (i == best or len(m) <= 12):
+                ax.annotate(money(v, currency), (i, max(v, 0)), xytext=(0, 4), textcoords="offset points",
+                            ha="center", fontsize=8.5 if len(m) > 6 else 9.5, color="#1d2d3e",
+                            fontweight="bold" if i == best else "normal")
+        ax.set_ylim(min(0, m.min() * 1.1), max(m.max(), 1) * 1.15)
+        shown.append(_image(fig, "Net sales by month"))
+    for frame, what, label_of in ((cust, "customers", lambda c, r: f"{r['name']}"), (item, "items", lambda c, r: f"{r['name']}")):
+        if frame.empty:
+            continue
+        head, rest = frame.head(TOP), frame.iloc[TOP:]
+        names = [str(label_of(c, r))[:38] for c, r in head.iterrows()] + ([f"Other {len(rest)} {what}"] if len(rest) else [])
+        vals = [float(v) for v in head.net] + ([float(rest.net.sum())] if len(rest) else [])
+        title = f"Top {len(head)} {what} by net sales" if len(rest) else f"Net sales by {what[:-1]}"
+        share = (lambda v: f"  ·  {v / net * 100:.1f}%") if net else (lambda v: "")
+        fig, ax = _figure(0.42 * len(names) + 1.3, title, f"{currency}, excluding tax · {scope} · % = share of {money(net, currency)}",
+                          left=_bars_left(names))
+        _hbar(ax, names, vals, [money(v, currency) + share(v) for v in vals], [BLUE] * len(head) + [OTHER] * bool(len(rest)))
+        shown.append(_image(fig, title))
+    return [x + "\n" for x in shown]
+
 def _excel(title, currency, kpi, month, cust, item, docs, overdue, d_from, d_to, customer) -> str:
     """The whole report as a workbook: key figures, by month / customer / item, and every document (not only 30)."""
-    money = ("Net sales", "Still to be paid", "Gross profit", "Net", "Tax", "Total")
+    money_cols = ("Net sales", "Still to be paid", "Gross profit", "Net", "Tax", "Total")
     labels = {
         "invoices": "Invoices", "credit_memos": "Credit memos", "gross_invoiced_excl_tax": "Invoiced (excl. tax)",
         "credit_memos_excl_tax": "Less credit memos", "net_sales_excl_tax": "Net sales", "tax": "Tax charged",
@@ -242,6 +289,6 @@ def _excel(title, currency, kpi, month, cust, item, docs, overdue, d_from, d_to,
         "note": "Full figures are on the next sheets: Key figures, By month, By customer, By item and Invoices.",
     }
     return excel_link(name, {"Key figures": key, "By month": by_month, "By customer": by_cust, "By item": by_item,
-                             "Invoices": documents}, money_cols=money, title="Sales analysis by invoice", subtitle=period,
+                             "Invoices": documents}, money_cols=money_cols, title="Sales analysis by invoice", subtitle=period,
                       summary=summary, bars={"By month": ("Net sales",), "By customer": ("Net sales",),
                                              "By item": ("Net sales",)})

@@ -12,4 +12,5 @@ ExecStart=%h/.local/bin/uv run --frozen python -m sapb1_ai.alerts
 ExecStart=-%h/.local/bin/uv run --frozen python -m sapb1_ai.anomalies
 ExecStart=-%h/.local/bin/uv run --frozen python -m sapb1_ai.finance
 ExecStart=-%h/.local/bin/uv run --frozen python -m sapb1_ai.webui
+ExecStart=-%h/.local/bin/uv run --frozen python -m sapb1_ai.dashboard
 ExecStart=-%h/.local/bin/uv run --frozen python -m sapb1_ai.market

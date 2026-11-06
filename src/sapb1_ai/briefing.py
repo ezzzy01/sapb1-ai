@@ -12,6 +12,7 @@ import httpx
 
 from .anomalies import TYPE_NAMES
 from .executive import executive_summary
+from .helpers import briefing_lines
 from .llm import ask
 from .numbers import money
 from .sync import DATA_DIR
@@ -42,6 +43,9 @@ def build() -> str:
                  + (": " + ", ".join(f"{c['customer']} ({_m(cur, c['open_order_value'])})" for c in risk["customers_most_affected"][:3]) if risk["customers_most_affected"] else "") + ".")
     for u in risk["most_urgent"][:3]:
         facts.append(f"- {'🛑' if u['status'] == 'LINE STOP RISK' else '⚠️'} **{u['ItemName']}** (whs {u['WhsCode']}): {u['action']}")
+
+    facts.append("\n## ✅ Today's to-do")
+    facts.extend(briefing_lines())
 
     facts.append("\n## 💰 Money")
     facts.append(f"- Stock on hand {_m(cur, inv['stock_value'])}; excess {_m(cur, inv['excess_stock_value'])}; dead stock {_m(cur, inv['dead_stock_value'])}.")

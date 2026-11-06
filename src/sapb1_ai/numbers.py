@@ -67,3 +67,69 @@ def prompt_rule(cur: str) -> str:
             f"front, e.g. {example} or {money(-1250.5, cur)}; write the currency as {label(cur) or 'the tools give it'}. "
             "Never shorten to K/M/k, never round to whole amounts, never write 'about' or 'around' for an exact figure. "
             "Quantities as whole units (1,234) unless they have decimals; percentages with one decimal (26.7%).")
+
+
+# ---------- the model's own text: shortened amounts back to the exact figure ----------
+
+import re  # noqa: E402
+
+_SCALES = {"k": 1e3, "thousand": 1e3, "ribu": 1e3, "m": 1e6, "mil": 1e6, "mln": 1e6, "million": 1e6, "juta": 1e6,
+           "b": 1e9, "bn": 1e9, "billion": 1e9, "bilion": 1e9}
+_CUR = r"(?:RM|MYR|USD|EUR|SGD|CAN|CAD|\$)"
+# "$1.67M", "RM 8.1K", "$1.34 million", "RM2.5 juta"; a short suffix must be attached, a word may follow a space.
+SHORT_AMOUNT = re.compile(rf"(?P<cur>{_CUR})\s?(?P<num>\d{{1,3}}(?:\.\d{{1,3}})?)"
+                          r"(?:(?P<abbr>[KkMmBb]|bn|mil|mln)|\s?(?P<word>thousand|million|billion|ribu|juta|bilion))(?![A-Za-z])")
+_NUMBER = re.compile(r"-?\d[\d,]*(?:\.\d+)?")
+
+
+class ExactAmounts:
+    """Fixes amounts the model shortened ("$1.67M") in a streamed answer, using the exact figures in the tool results
+    of this request ($1,670,701.79). Left as written when no figure, or more than one different figure, fits."""
+
+    HOLD = 30  # characters kept back so an amount split over two chunks is still seen whole
+
+    def __init__(self):
+        self.values: set[float] = set()
+        self.buf = ""
+
+    def learn(self, text: str) -> None:
+        for n in _NUMBER.findall(text or ""):
+            try:
+                v = abs(float(n.replace(",", "")))
+            except ValueError:
+                continue
+            if v >= 1000:
+                self.values.add(round(v, 2))
+
+    def _exact(self, m: re.Match) -> str:
+        num = m["num"]
+        scale = _SCALES[(m["abbr"] or m["word"]).lower()]
+        decimals = len(num.split(".")[1]) if "." in num else 0
+        shown = float(num)
+        fits = {v for v in self.values if round(v / scale, decimals) == shown}
+        if len(fits) != 1:
+            return m.group(0)
+        return money(fits.pop(), m["cur"])
+
+    def fix(self, text: str) -> str:
+        return SHORT_AMOUNT.sub(self._exact, text)
+
+    def feed(self, chunk: str) -> str:
+        if "data:image" in chunk:  # a chart image: pass through untouched
+            out, self.buf = self.fix(self.buf) + chunk, ""
+            return out
+        self.buf = self.fix(self.buf + chunk)
+        cut = max(0, len(self.buf) - self.HOLD)
+        out, self.buf = self.buf[:cut], self.buf[cut:]
+        return out
+
+    def flush(self) -> str:
+        out, self.buf = self.fix(self.buf), ""
+        return out
+
+    async def wrap(self, chunks):
+        async for chunk in chunks:
+            if out := self.feed(chunk):
+                yield out
+        if out := self.flush():
+            yield out
