@@ -1,0 +1,722 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Home dashboard</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230a6ed1'/%3E%3Ctext x='32' y='43' text-anchor='middle' font-family='Arial,Helvetica,sans-serif' font-size='30' font-weight='700' fill='%23fff'%3EB1%3C/text%3E%3C/svg%3E">
+<!-- The home dashboard (src/sapb1_ai/dashboard.py), shown on the chat site's start screen by webui/loader.js.
+     Charts are plain SVG drawn below; no outside scripts. Colours: the data-viz reference palette (validated set). -->
+<style>
+.viz-root {
+  color-scheme: light;
+  --bg: #f5f6f7; --surface-1: #ffffff; --border: #e4e8ec; --grid: #eef1f3;
+  --text-primary: #1d2d3e; --text-secondary: #556b82; --text-muted: #8396a8;
+  --brand: #0070f2;
+  --series-1: #2a78d6; --series-2: #eb6834; --series-3: #1baf7a; --series-4: #eda100; --other: #a9b4be; --last-year: #a9b4be;
+  --seq-100: #cde2fb; --seq-200: #9ec5f4; --seq-300: #6da7ec; --seq-400: #3987e5; --seq-500: #256abf; --seq-600: #184f95; --seq-700: #0d366b;
+  --ord-1: #86b6ef; --ord-2: #5598e7; --ord-3: #2a78d6; --ord-4: #1c5cab; --ord-5: #104281;
+  --good: #0ca30c; --good-text: #006300; --critical: #d03b3b; --critical-text: #b42828;
+  --shadow: 0 0 0.125rem 0 rgba(34,53,72,.15), 0 0.125rem 0.5rem 0 rgba(34,53,72,.15);
+}
+.viz-root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #12171c; --surface-1: #1d232a; --border: #2f3943; --grid: #27303a;
+  --text-primary: #eaecee; --text-secondary: #a9b4be; --text-muted: #8396a8;
+  --brand: #4db1ff;
+  --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --series-4: #c98500; --other: #5b6b7b; --last-year: #6a7a8a;
+  --seq-100: #1a2a3d; --seq-200: #104281; --seq-300: #184f95; --seq-400: #1c5cab; --seq-500: #2a78d6; --seq-600: #5598e7; --seq-700: #9ec5f4;
+  --ord-1: #184f95; --ord-2: #1c5cab; --ord-3: #2a78d6; --ord-4: #5598e7; --ord-5: #86b6ef;
+  --good: #0ca30c; --good-text: #4cc94c; --critical: #d03b3b; --critical-text: #f07a7a;
+  --shadow: 0 0 0 1px #2f3943;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; }
+body { font-family: "72", "72full", Arial, Helvetica, sans-serif; background: var(--bg); color: var(--text-primary); font-size: 14px; }
+.wrap { max-width: 1400px; margin: 0 auto; padding: 20px 24px 40px; }
+header.top { display: flex; align-items: flex-start; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; }
+header.top h1 { font-size: 22px; font-weight: 700; margin: 0 0 2px; }
+header.top .sub { color: var(--text-secondary); font-size: 13px; }
+header.top .grow { flex: 1; }
+button, select { font: inherit; }
+.btn { border: 1px solid var(--brand); background: var(--brand); color: #fff; border-radius: 8px; padding: 8px 16px; font-weight: 600; cursor: pointer; }
+.btn:hover { filter: brightness(1.08); }
+.btn.ghost { background: transparent; color: var(--brand); }
+.filters { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; background: var(--surface-1); border-radius: 12px; box-shadow: var(--shadow); padding: 10px 14px; margin-bottom: 16px; }
+.filters label { color: var(--text-secondary); font-size: 13px; display: flex; align-items: center; gap: 6px; }
+.filters select { border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; background: var(--surface-1); color: var(--text-primary); }
+.filters .note { margin-left: auto; color: var(--text-muted); font-size: 12px; }
+.filters .note.warn { color: #b45309; font-weight: 600; }
+[data-theme="dark"] .filters .note.warn { color: #fbbf24; }
+.btn.small { padding: 4px 12px; font-size: 13px; }
+.btn:disabled { opacity: .55; cursor: default; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.tile { background: var(--surface-1); border-radius: 12px; box-shadow: var(--shadow); padding: 14px 16px; border-left: 4px solid var(--series-1); min-height: 104px; }
+.tile .k { color: var(--text-secondary); font-size: 13px; margin-bottom: 6px; }
+.tile .v { font-size: 28px; font-weight: 700; letter-spacing: -0.5px; line-height: 1.1; }
+.tile .d { font-size: 12px; margin-top: 6px; color: var(--text-secondary); }
+.up { color: var(--good-text); } .down { color: var(--critical-text); }
+.grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+@media (max-width: 1000px) { .grid { grid-template-columns: 1fr; } }
+.card { background: var(--surface-1); border-radius: 12px; box-shadow: var(--shadow); padding: 14px 16px 12px; min-width: 0; position: relative; }
+.card.wide { grid-column: 1 / -1; }
+.card h2 { font-size: 15px; font-weight: 700; margin: 0; }
+.card .cs { color: var(--text-secondary); font-size: 12px; margin: 2px 0 8px; }
+.card .acts { position: absolute; top: 12px; right: 14px; display: flex; gap: 10px; }
+.card .acts button { background: none; border: 0; color: var(--brand); cursor: pointer; font-size: 12px; padding: 2px; }
+.card .acts button:hover { text-decoration: underline; }
+.legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; color: var(--text-secondary); margin: 0 0 6px; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+.legend i.line { height: 3px; border-radius: 2px; vertical-align: 3px; width: 14px; }
+svg { display: block; width: 100%; overflow: visible; }
+svg text { fill: var(--text-secondary); font-size: 11px; font-family: inherit; }
+svg .val { fill: var(--text-primary); font-size: 11px; paint-order: stroke; stroke: var(--surface-1); stroke-width: 3px; stroke-linejoin: round; }
+svg .axis { stroke: var(--border); }
+svg .gridl { stroke: var(--grid); }
+.hit { fill: transparent; cursor: default; }
+table.data { width: 100%; border-collapse: collapse; font-size: 12px; }
+table.data th, table.data td { text-align: right; padding: 4px 8px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+table.data th:first-child, table.data td:first-child { text-align: left; white-space: normal; }
+table.data th { color: var(--text-secondary); font-weight: 600; }
+.tablebox { max-height: 320px; overflow: auto; }
+#tip { position: fixed; pointer-events: none; background: var(--surface-1); color: var(--text-primary); border: 1px solid var(--border); box-shadow: var(--shadow);
+       border-radius: 8px; padding: 8px 10px; font-size: 12px; line-height: 1.5; display: none; z-index: 10; max-width: 300px; }
+#tip b { font-weight: 700; } #tip .r { display: flex; justify-content: space-between; gap: 14px; } #tip i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 6px; }
+.empty { color: var(--text-muted); padding: 30px 0; text-align: center; font-size: 13px; }
+.msg { background: var(--surface-1); border-radius: 12px; box-shadow: var(--shadow); padding: 28px; text-align: center; color: var(--text-secondary); }
+.loading { opacity: .55; transition: opacity .2s; }
+/* the chat bar floating at the bottom (full view only; beside the chat, the chat has its own box) */
+.wrap { padding-bottom: 120px; }
+.askbar { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); width: min(760px, calc(100% - 32px)); z-index: 20;
+          display: flex; gap: 8px; align-items: center; background: var(--surface-1); border: 1px solid var(--border); border-radius: 26px;
+          box-shadow: 0 0.25rem 1.25rem rgba(34,53,72,.22); padding: 6px 6px 6px 18px; }
+.askbar input { flex: 1; border: 0; outline: 0; background: transparent; color: var(--text-primary); font: inherit; font-size: 15px; padding: 8px 0; min-width: 0; }
+.askbar input::placeholder { color: var(--text-muted); }
+.askbar button { border: 0; background: var(--brand); color: #fff; border-radius: 20px; padding: 9px 18px; font-weight: 600; cursor: pointer; }
+.askbar button:disabled { opacity: .45; cursor: default; }
+.askhint { position: fixed; left: 50%; bottom: 2px; transform: translateX(-50%); font-size: 11px; color: var(--text-muted); z-index: 20; white-space: nowrap; }
+body.split .askbar, body.split .askhint { display: none; }
+/* Dashboard | Side by side | Chat */
+.views { display: inline-flex; background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 3px; gap: 2px; flex: none; }
+.views button { border: 0; background: transparent; color: var(--text-secondary); border-radius: 7px; padding: 6px 12px; font-weight: 600; font-size: 13px; cursor: pointer; white-space: nowrap; }
+.views button:hover { color: var(--text-primary); }
+.views button[aria-pressed="true"] { background: var(--brand); color: #fff; }
+body.narrow .views { display: none; }  /* phones: no side by side; chats are in the left sidebar */
+/* "Side by side": which chat goes beside the dashboard */
+.picker { position: fixed; inset: 0; z-index: 40; background: rgba(0,0,0,.25); display: flex; align-items: flex-start; justify-content: flex-end; padding: 64px 20px 20px; }
+.picker .box { background: var(--surface-1); color: var(--text-primary); border: 1px solid var(--border); border-radius: 14px; box-shadow: 0 .5rem 2rem rgba(34,53,72,.28);
+               width: min(380px, 100%); max-height: calc(100vh - 90px); display: flex; flex-direction: column; overflow: hidden; }
+.picker h3 { margin: 0; padding: 14px 16px 4px; font-size: 15px; }
+.picker .hint { padding: 0 16px 10px; color: var(--text-secondary); font-size: 12px; }
+.picker .list { overflow: auto; padding: 0 8px 8px; }
+.picker .sec { color: var(--text-muted); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; padding: 10px 8px 4px; }
+.picker button.opt { display: flex; width: 100%; gap: 10px; align-items: center; text-align: left; border: 0; background: transparent; color: var(--text-primary);
+                     border-radius: 9px; padding: 9px 10px; cursor: pointer; font-size: 13px; }
+.picker button.opt:hover, .picker button.opt:focus-visible { background: var(--bg); outline: none; }
+.picker button.opt .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.picker button.opt .w { color: var(--text-muted); font-size: 11px; flex: none; }
+.picker button.opt.new { color: var(--brand); font-weight: 600; }
+.picker .foot { border-top: 1px solid var(--grid); padding: 8px 12px; display: flex; justify-content: flex-end; }
+.picker .foot button { border: 0; background: transparent; color: var(--text-secondary); cursor: pointer; font-size: 13px; padding: 4px 8px; }
+/* scrollbars like the chat site's (thin, rounded, theme coloured) */
+@supports not selector(::-webkit-scrollbar) {  /* Firefox; in Chrome these would replace the styles below */
+  html { scrollbar-width: thin; scrollbar-color: #d7d7d799 transparent; }
+  html:has(body[data-theme="dark"]) { scrollbar-color: #43434399 transparent; }
+}
+::-webkit-scrollbar { width: .45rem; height: .45rem; }
+::-webkit-scrollbar-track { background: transparent; border-radius: 9999px; }
+::-webkit-scrollbar-thumb { background: #d7d7d799; border: 1px solid #fff; border-radius: 9999px; }
+body[data-theme="dark"] ::-webkit-scrollbar-thumb { background: #43434399; border-color: #000; }
+::-webkit-scrollbar-corner { background: transparent; }
+.menu { border: 1px solid var(--border); background: var(--surface-1); color: var(--text-primary); border-radius: 8px; width: 38px; height: 38px;
+        font-size: 18px; line-height: 1; cursor: pointer; flex: none; }
+/* phones and narrow windows */
+@media (max-width: 640px) {
+  .wrap { padding: 12px 12px 110px; }
+  header.top { gap: 10px; align-items: center; }
+  header.top h1 { font-size: 18px; }
+  header.top .sub { font-size: 12px; }
+  .btn { padding: 7px 12px; font-size: 13px; }
+  .filters { padding: 8px 10px; gap: 8px; }
+  .filters select { max-width: 170px; }
+  .filters .note { margin-left: 0; flex: 1; min-width: 60%; }
+  .tiles { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .tile { padding: 10px 12px; min-height: 0; border-left-width: 3px; }
+  .tile .k, .tile .d { font-size: 12px; }
+  .tile .v { font-size: 20px; }
+  .grid { gap: 12px; }
+  .card { padding: 12px 12px 10px; }
+  .card .acts { position: static; margin: -2px 0 6px; gap: 16px; }
+  .card .acts button { font-size: 13px; padding: 4px 0; }
+  .askbar { bottom: 10px; width: calc(100% - 20px); }
+  .askhint { display: none; }
+}
+</style>
+</head>
+<body class="viz-root">
+<div class="wrap">
+  <header class="top">
+    <button class="menu" id="menu" type="button" title="Menu: chats, New Chat, Dashboard" aria-label="Open the sidebar" hidden>☰</button>
+    <div class="grow">
+      <h1 id="hello">Home</h1>
+      <div class="sub" id="company"></div>
+    </div>
+    <div class="views" id="views" role="group" aria-label="Show">
+      <button type="button" data-view="dash" aria-pressed="true" title="Only the dashboard">Dashboard</button>
+      <button type="button" data-view="split" aria-pressed="false" title="Dashboard and chat side by side">Side by side</button>
+    </div>
+  </header>
+  <div class="filters" id="filters" hidden>
+    <label>Year <select id="year"></select></label>
+    <label id="grouplab">Item group <select id="group"></select></label>
+    <span class="note" id="note"></span>
+    <button class="btn ghost small" id="refresh" type="button" title="Re-read the figures now and pull the latest data from SAP B1">↻ Refresh data</button>
+  </div>
+  <div id="main"><div class="msg">Loading the figures from SAP B1…</div></div>
+</div>
+<form class="askbar" id="askbar" autocomplete="off">
+  <input id="ask" maxlength="2000" placeholder="Ask about these figures… e.g. why are sales lower than last year?" aria-label="Ask the AI">
+  <button type="submit" id="askbtn" disabled>Ask</button>
+</form>
+<div class="askhint" id="askhint">The answer opens beside the dashboard</div>
+<div id="tip" role="tooltip"></div>
+<div class="picker" id="picker" hidden>
+  <div class="box" role="dialog" aria-modal="true" aria-labelledby="pickh">
+    <h3 id="pickh">Which chat beside the dashboard?</h3>
+    <div class="hint">Start a new one or carry on with an earlier chat.</div>
+    <div class="list" id="picklist"></div>
+    <div class="foot"><button type="button" id="pickcancel">Cancel</button></div>
+  </div>
+</div>
+<script>
+(() => {
+  const root = document.body;
+  const $ = (id) => document.getElementById(id);
+  const NS = "http://www.w3.org/2000/svg";
+  const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const SERIES = ["--series-1", "--series-2", "--series-3", "--series-4"];
+  let D = null, CUR = "";
+
+  // ---- theme follows the chat site (Open WebUI puts class "dark" on <html>)
+  function theme() {
+    let dark = false;
+    try { dark = window.parent.document.documentElement.classList.contains("dark"); }
+    catch (e) { dark = matchMedia("(prefers-color-scheme: dark)").matches; }
+    root.dataset.theme = dark ? "dark" : "light";
+  }
+  theme();
+  try { new MutationObserver(theme).observe(window.parent.document.documentElement, { attributes: true, attributeFilter: ["class"] }); } catch (e) {}
+
+  // ---- talking to the chat site (webui/loader.js)
+  const tell = (msg) => { try { window.parent.postMessage(Object.assign({ sapb1: true }, msg), location.origin); } catch (e) {} };
+  document.querySelectorAll("#views button").forEach((b) => {
+    b.onclick = () => (b.dataset.view === "split" ? pickChat() : tell({ action: "view", view: b.dataset.view }));
+  });
+  // ---- "Side by side": ask which chat to open beside the dashboard (a new one, this one, or a recent one)
+  const ago = (t) => {
+    const m = Math.round((Date.now() / 1000 - t) / 60);
+    return m < 1 ? "now" : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : new Date(t * 1000).toLocaleDateString(undefined, { day: "numeric", month: "short" });
+  };
+  const closePicker = () => { $("picker").hidden = true; };
+  $("pickcancel").onclick = closePicker;
+  $("picker").onclick = (e) => { if (e.target === $("picker")) closePicker(); };
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closePicker(); });
+  async function pickChat() {
+    let here = "", ours = false;   // ours: shown inside our own chat page (/sapb1/chat), not Open WebUI
+    try {
+      const pl = window.parent.location;
+      ours = pl.pathname.startsWith("/sapb1/chat");
+      const m = pl.pathname.match(/^\/c\/([^/]+)/);
+      here = ours ? new URLSearchParams(pl.search).get("c") || "" : m ? decodeURIComponent(m[1]) : "";
+    } catch (e) {}
+    const opt = (id, title, when, cls = "") =>
+      `<button type="button" class="opt ${cls}" data-chat="${esc(id)}"><span class="t">${esc(title)}</span>${when ? `<span class="w">${esc(when)}</span>` : ""}</button>`;
+    $("picklist").innerHTML = opt("new", "+ New chat", "", "new") + `<div class="sec">Earlier chats</div><div class="empty" style="padding:12px 0">Loading your chats…</div>`;
+    $("picker").hidden = false;
+    $("picklist").querySelector("button").focus();
+    let chats = [];
+    try {
+      if (ours) {
+        const r = await fetch("/sapb1/chat/list", { credentials: "include", cache: "no-store" });
+        if (r.ok) chats = (await r.json()).chats.map((c) => ({ id: c.id, title: c.title, updated_at: c.updated }));
+      } else {
+        const r = await fetch("/api/v1/chats/?page=1", { headers: { Authorization: "Bearer " + localStorage.token }, cache: "no-store" });
+        if (r.ok) chats = await r.json();
+      }
+    } catch (e) {}
+    const cur = chats.find((c) => c.id === here);
+    let html = opt("new", "+ New chat", "", "new");
+    if (here) html += `<div class="sec">This chat</div>` + opt(here, cur ? cur.title : "The chat you have open", "");
+    const rest = chats.filter((c) => c.id !== here).slice(0, 12);
+    html += `<div class="sec">Earlier chats</div>` + (rest.length ? rest.map((c) => opt(c.id, c.title || "Untitled chat", ago(c.updated_at))).join("")
+      : `<div class="empty" style="padding:12px 0">No earlier chats yet.</div>`);
+    if (!$("picker").hidden) {
+      $("picklist").innerHTML = html;
+      $("picklist").querySelector("button").focus();
+    }
+  }
+  $("picklist").onclick = (e) => {
+    const b = e.target.closest("button[data-chat]");
+    if (!b) return;
+    closePicker();
+    tell({ action: "view", view: "split", chat: b.dataset.chat });
+  };
+  $("menu").onclick = () => tell({ action: "menu" });
+  // How the chat site shows us (webui/loader.js): full screen or beside the chat, small screen, sidebar hidden.
+  window.addEventListener("message", (e) => {
+    if (e.origin !== location.origin || !e.data || !e.data.sapb1 || !e.data.mode) return;
+    document.body.classList.toggle("split", e.data.mode === "split");
+    document.body.classList.toggle("narrow", !!e.data.narrow);
+    document.querySelectorAll("#views button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.view === (e.data.mode === "split" ? "split" : "dash"))));
+    $("menu").hidden = !e.data.menu;
+    $("askhint").textContent = e.data.narrow ? "The answer opens in the chat" : "The answer opens beside the dashboard";
+    $("ask").placeholder = e.data.narrow || innerWidth < 640 ? "Ask about these figures…" : "Ask about these figures… e.g. why are sales lower than last year?";
+  });
+  // The chat bar: what the dashboard is showing goes with the question when it is not the default view.
+  $("ask").oninput = () => { $("askbtn").disabled = !$("ask").value.trim(); };
+  $("askbar").onsubmit = (ev) => {
+    ev.preventDefault();
+    const text = $("ask").value.trim();
+    if (!text) return;
+    const ctx = [];
+    if (D && D.years && D.year !== D.years[0]) ctx.push(String(D.year));
+    if (D && D.group) ctx.push(`item group ${D.group}`);
+    tell({ action: "ask", text: ctx.length ? `${text} (looking at the dashboard for ${ctx.join(", ")})` : text });
+    $("ask").value = ""; $("askbtn").disabled = true;
+  };
+
+  // ---- numbers
+  const fmt = (v, d = 2) => Number(v || 0).toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
+  const money = (v) => `${CUR} ${fmt(v)}`;
+  function short(v) {
+    const a = Math.abs(v), s = v < 0 ? "-" : "";
+    if (a >= 1e9) return s + (a / 1e9).toFixed(2) + "B";
+    if (a >= 1e6) return s + (a / 1e6).toFixed(2) + "M";
+    if (a >= 1e3) return s + (a / 1e3).toFixed(1) + "K";
+    return s + a.toFixed(0);
+  }
+  const esc = (t) => String(t ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const css = (name) => getComputedStyle(root).getPropertyValue(name).trim();
+
+  // ---- svg helpers
+  function el(tag, attrs = {}, parent) {
+    const e = document.createElementNS(NS, tag);
+    for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+    if (parent) parent.append(e);
+    return e;
+  }
+  // Width of a chart: its card's inside width (one column of cards below 1000px), at most 640.
+  function chartW() {
+    const w = $("main").clientWidth || innerWidth, col = innerWidth > 1000 ? (w - 16) / 2 : w;
+    return Math.round(Math.max(260, Math.min(640, col - 34)));
+  }
+  const fit = (t, px) => { t = String(t); const n = Math.max(4, Math.floor(px / 6.2)); return t.length > n ? t.slice(0, n - 1) + "…" : t; };
+  const monthLabel = (m, space) => (space < 26 ? m[0] : m);
+  function svgBox(w, h) { return el("svg", { viewBox: `0 0 ${w} ${h}`, role: "img" }); }
+  function niceMax(v) {
+    if (v <= 0) return 1;
+    const p = Math.pow(10, Math.floor(Math.log10(v))), n = v / p;
+    return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10) * p;
+  }
+  // rounded top on a vertical bar / rounded end on a horizontal bar, square at the baseline
+  function barPath(x, y, w, h, horizontal) {
+    const r = Math.max(0, Math.min(4, (horizontal ? h : w) / 2, horizontal ? w : h));
+    if (horizontal) return `M${x},${y}h${w - r}a${r},${r} 0 0 1 ${r},${r}v${h - 2 * r}a${r},${r} 0 0 1 -${r},${r}h-${w - r}z`;
+    return `M${x},${y + h}v-${h - r}a${r},${r} 0 0 1 ${r},-${r}h${w - 2 * r}a${r},${r} 0 0 1 ${r},${r}v${h - r}z`;
+  }
+
+  // ---- tooltip
+  const tip = $("tip");
+  function showTip(ev, html) {
+    tip.innerHTML = html; tip.style.display = "block";
+    const r = tip.getBoundingClientRect();
+    let x = ev.clientX + 14, y = ev.clientY + 14;
+    if (x + r.width > innerWidth - 8) x = ev.clientX - r.width - 14;
+    if (y + r.height > innerHeight - 8) y = ev.clientY - r.height - 14;
+    tip.style.left = x + "px"; tip.style.top = y + "px";
+  }
+  const hideTip = () => { tip.style.display = "none"; };
+  const row = (sw, k, v) => `<div class="r"><span>${sw ? `<i style="background:${sw}"></i>` : ""}${esc(k)}</span><b>${esc(v)}</b></div>`;
+
+  // ---- a card: title, subtitle, chart, table view, "ask the AI"
+  function card(title, sub, { wide = false, ask = "", legend = null } = {}) {
+    const c = document.createElement("section");
+    c.className = "card" + (wide ? " wide" : "");
+    c.innerHTML = `<h2>${esc(title)}</h2><div class="cs">${esc(sub)}</div><div class="acts"></div><div class="lg"></div><div class="body"></div><div class="tablebox" hidden></div>`;
+    const acts = c.querySelector(".acts");
+    if (legend) c.querySelector(".lg").innerHTML = `<div class="legend">${legend.map(([n, col, line]) => `<span><i class="${line ? "line" : ""}" style="background:${col}"></i>${esc(n)}</span>`).join("")}</div>`;
+    c.setTable = (head, rows) => {
+      const b = document.createElement("button");
+      b.textContent = "Table";
+      b.onclick = () => {
+        const tb = c.querySelector(".tablebox"), body = c.querySelector(".body");
+        const show = tb.hidden;
+        if (show && !tb.innerHTML) tb.innerHTML = `<table class="data"><thead><tr>${head.map((h) => `<th>${esc(h)}</th>`).join("")}</tr></thead><tbody>${rows.map((r) => `<tr>${r.map((v) => `<td>${esc(v)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+        tb.hidden = !show; body.hidden = show; c.querySelector(".lg").hidden = show; b.textContent = show ? "Chart" : "Table";
+      };
+      acts.prepend(b);
+    };
+    if (ask) {
+      const a = document.createElement("button");
+      a.textContent = "Ask the AI ›"; a.title = `Ask: "${ask}"`;
+      a.onclick = () => tell({ action: "ask", text: ask });
+      acts.append(a);
+    }
+    return c;
+  }
+
+  // ---- charts
+  // partial: the last month of the main series is the current month, still running ("so far")
+  function lineChart(months, series, lastMonth, partial = false) {
+    const W = chartW(), H = 250, L = 56, R = 14, T = 12, B = 26, iw = W - L - R, ih = H - T - B;
+    const svg = svgBox(W, H);
+    const max = niceMax(Math.max(1, ...series.flatMap((s) => s.values.slice(0, s.upto))));
+    const x = (i) => L + (i + 0.5) * (iw / 12), y = (v) => T + ih - (v / max) * ih;
+    for (let k = 0; k <= 4; k++) {
+      const v = (max / 4) * k;
+      el("line", { x1: L, x2: W - R, y1: y(v), y2: y(v), class: k ? "gridl" : "axis" }, svg);
+      el("text", { x: L - 8, y: y(v) + 4, "text-anchor": "end" }, svg).textContent = short(v);
+    }
+    months.forEach((m, i) => { el("text", { x: x(i), y: H - 8, "text-anchor": "middle" }, svg).textContent = monthLabel(m, iw / 12); });
+    series.forEach((s, si) => {
+      const open = partial && si === 0 && s.upto > 1;  // draw the running month apart
+      const solid = open ? s.upto - 1 : s.upto;
+      const pts = s.values.slice(0, solid).map((v, i) => `${x(i)},${y(v)}`).join(" ");
+      el("polyline", { points: pts, fill: "none", stroke: s.color, "stroke-width": 2, "stroke-linejoin": "round", "stroke-dasharray": s.dash || "" }, svg);
+      if (open) {
+        const a = s.upto - 2, b = s.upto - 1;
+        el("line", { x1: x(a), y1: y(s.values[a]), x2: x(b), y2: y(s.values[b]), stroke: s.color, "stroke-width": 2, "stroke-dasharray": "4 4" }, svg);
+      }
+      s.values.slice(0, s.upto).forEach((v, i) => {
+        const hollow = open && i === s.upto - 1;
+        el("circle", { cx: x(i), cy: y(v), r: 4, fill: hollow ? css("--surface-1") : s.color, stroke: hollow ? s.color : css("--surface-1"), "stroke-width": 2 }, svg);
+      });
+    });
+    // label only the latest point of the main series
+    const main = series[0];
+    if (main.upto && (main.values[main.upto - 1] || partial)) {
+      const i = main.upto - 1;
+      const t = el("text", { x: x(i), y: y(main.values[i]) - 10, "text-anchor": i > 9 ? "end" : "middle", class: "val" }, svg);
+      t.textContent = short(main.values[i]) + (partial ? " so far" : "");
+    }
+    // crosshair + tooltip
+    const cross = el("line", { y1: T, y2: T + ih, stroke: css("--text-muted"), "stroke-width": 1, "stroke-dasharray": "3 3", visibility: "hidden" }, svg);
+    months.forEach((m, i) => {
+      const r = el("rect", { x: L + i * (iw / 12), y: T, width: iw / 12, height: ih, class: "hit" }, svg);
+      r.addEventListener("mousemove", (ev) => {
+        cross.setAttribute("x1", x(i)); cross.setAttribute("x2", x(i)); cross.setAttribute("visibility", "visible");
+        showTip(ev, `<b>${m}${partial && i === series[0].upto - 1 ? " (so far)" : ""}</b>` + series.map((s) => row(s.color, s.name, i < s.upto ? money(s.values[i]) : "–")).join(""));
+      });
+      r.addEventListener("mouseleave", () => { cross.setAttribute("visibility", "hidden"); hideTip(); });
+    });
+    return svg;
+  }
+
+  function stackedArea(series, upto, partial = false) {
+    const W = chartW(), H = 250, L = 56, R = 14, T = 12, B = 26, iw = W - L - R, ih = H - T - B;
+    const svg = svgBox(W, H);
+    const n = Math.max(upto, 1), totals = Array.from({ length: n }, (_, i) => series.reduce((a, s) => a + Math.max(0, s.values[i]), 0));
+    const max = niceMax(Math.max(1, ...totals));
+    const x = (i) => L + (n === 1 ? iw / 2 : (i / (n - 1)) * iw), y = (v) => T + ih - (v / max) * ih;
+    for (let k = 0; k <= 4; k++) {
+      const v = (max / 4) * k;
+      el("line", { x1: L, x2: W - R, y1: y(v), y2: y(v), class: k ? "gridl" : "axis" }, svg);
+      el("text", { x: L - 8, y: y(v) + 4, "text-anchor": "end" }, svg).textContent = short(v);
+    }
+    for (let i = 0; i < n; i++) el("text", { x: x(i), y: H - 8, "text-anchor": "middle" }, svg).textContent = monthLabel(MONTHS[i], n > 1 ? iw / (n - 1) - 6 : iw);
+    const base = new Array(n).fill(0);
+    const cut = partial && n > 1 ? n - 1 : n;  // the running month ("so far") is drawn lighter
+    series.forEach((s) => {
+      const top = base.map((b, i) => b + Math.max(0, s.values[i]));
+      const band = (a, b, op) => {
+        const up = top.slice(a, b).map((v, k) => `${x(a + k)},${y(v)}`), down = base.slice(a, b).map((v, k) => `${x(a + k)},${y(v)}`).reverse();
+        el("polygon", { points: up.concat(down).join(" "), fill: s.color, "fill-opacity": op }, svg);
+      };
+      band(0, cut, 0.88);
+      if (cut < n) band(cut - 1, n, 0.3);
+      const up = top.map((v, i) => `${x(i)},${y(v)}`);
+      el("polyline", { points: up.join(" "), fill: "none", stroke: css("--surface-1"), "stroke-width": 2 }, svg); // 2px surface gap between bands
+      top.forEach((v, i) => (base[i] = v));
+    });
+    const cross = el("line", { y1: T, y2: T + ih, stroke: css("--text-primary"), "stroke-width": 1, "stroke-dasharray": "3 3", visibility: "hidden" }, svg);
+    for (let i = 0; i < n; i++) {
+      const w = n === 1 ? iw : iw / (n - 1), r = el("rect", { x: x(i) - w / 2, y: T, width: w, height: ih, class: "hit" }, svg);
+      r.addEventListener("mousemove", (ev) => {
+        cross.setAttribute("x1", x(i)); cross.setAttribute("x2", x(i)); cross.setAttribute("visibility", "visible");
+        showTip(ev, `<b>${MONTHS[i]}${partial && i === n - 1 ? " (so far)" : ""}</b>` + series.slice().reverse().map((s) => row(s.color, s.name, money(s.values[i]))).join("") + row("", "Total", money(totals[i])));
+      });
+      r.addEventListener("mouseleave", () => { cross.setAttribute("visibility", "hidden"); hideTip(); });
+    }
+    return svg;
+  }
+
+  function hbars(rows, { color = () => css("--series-1"), value = (r) => r.value, label = (r) => short(value(r)), tipHtml }) {
+    const W = chartW(), rowH = 28, L = Math.round(Math.min(230, W * 0.42, 12 + Math.max(...rows.map((r) => String(r.name).length), 4) * 6.4)), R = 56, T = 4;
+    const H = T + rows.length * rowH + 4, iw = W - L - R;
+    const svg = svgBox(W, H);
+    const max = Math.max(1e-9, ...rows.map(value));
+    el("line", { x1: L, x2: L, y1: T, y2: H - 4, class: "axis" }, svg);
+    rows.forEach((r, i) => {
+      const v = Math.max(0, value(r)), w = Math.max(v > 0 ? 2 : 0, (v / max) * iw), y = T + i * rowH + 5, h = rowH - 10;
+      const name = String(r.name);
+      el("text", { x: L - 8, y: y + h / 2 + 4, "text-anchor": "end" }, svg).textContent = fit(name, L - 12);
+      if (w) el("path", { d: barPath(L, y, w, h, true), fill: color(r, i) }, svg);
+      el("text", { x: L + w + 6, y: y + h / 2 + 4, class: "val" }, svg).textContent = label(r);
+      const hit = el("rect", { x: 0, y: y - 5, width: W, height: rowH, class: "hit" }, svg);
+      hit.addEventListener("mousemove", (ev) => showTip(ev, tipHtml(r)));
+      hit.addEventListener("mouseleave", hideTip);
+    });
+    return svg;
+  }
+
+  function scatter(items) {
+    const W = chartW(), H = 270, L = 56, R = 20, T = 14, B = 34, iw = W - L - R, ih = H - T - B;
+    const svg = svgBox(W, H);
+    const xmax = niceMax(Math.max(1, ...items.map((d) => d.sales)));
+    const ms = items.map((d) => d.margin_pct);
+    let ymin = Math.min(0, ...ms), ymax = Math.max(10, ...ms);
+    ymax = Math.ceil(ymax / 10) * 10; ymin = Math.floor(ymin / 10) * 10;
+    const qmax = Math.max(1, ...items.map((d) => Math.abs(d.qty)));
+    const x = (v) => L + (v / xmax) * iw, y = (v) => T + ih - ((v - ymin) / (ymax - ymin || 1)) * ih;
+    for (let k = 0; k <= 4; k++) {
+      const v = ymin + ((ymax - ymin) / 4) * k;
+      el("line", { x1: L, x2: W - R, y1: y(v), y2: y(v), class: Math.abs(v) < 1e-9 ? "axis" : "gridl" }, svg);
+      el("text", { x: L - 8, y: y(v) + 4, "text-anchor": "end" }, svg).textContent = v.toFixed(0) + "%";
+      const xv = (xmax / 4) * k;
+      el("text", { x: x(xv), y: H - 14, "text-anchor": "middle" }, svg).textContent = short(xv);
+    }
+    el("text", { x: L + iw / 2, y: H, "text-anchor": "middle" }, svg).textContent = `Sales (${CUR})  →`;
+    el("text", { x: 12, y: T + ih / 2, "text-anchor": "middle", transform: `rotate(-90 12 ${T + ih / 2})` }, svg).textContent = "Margin %";
+    const sorted = items.slice().sort((a, b) => Math.abs(b.qty) - Math.abs(a.qty)); // big bubbles first, small on top
+    sorted.forEach((d) => {
+      const r = 5 + 13 * Math.sqrt(Math.abs(d.qty) / qmax);
+      const c = el("circle", { cx: x(d.sales), cy: y(d.margin_pct), r, fill: css("--series-1"), "fill-opacity": 0.75, stroke: css("--surface-1"), "stroke-width": 2 }, svg);
+      c.addEventListener("mousemove", (ev) => showTip(ev, `<b>${esc(d.name)}</b>${row("", "Item", d.code)}${row("", "Sales", money(d.sales))}${row("", "Margin", d.margin_pct.toFixed(1) + "%")}${row("", "Quantity", fmt(d.qty, 0))}`));
+      c.addEventListener("mouseleave", hideTip);
+    });
+    // name the top three by sales
+    const placed = [];  // label boxes already drawn, so labels do not sit on each other
+    items.slice(0, 3).forEach((d) => {
+      const px = x(d.sales), name = fit(d.name, Math.min(170, W * 0.36)), tw = name.length * 6.2;
+      const anchor = px < L + 90 ? "start" : px > W - R - 90 ? "end" : "middle";
+      const tx = anchor === "start" ? Math.max(px - 6, L + 4) : anchor === "end" ? Math.min(px + 6, W - R) : px;
+      const x0 = anchor === "start" ? tx : anchor === "end" ? tx - tw : tx - tw / 2;
+      const r = 5 + 13 * Math.sqrt(Math.abs(d.qty) / qmax);
+      let ty = Math.max(y(d.margin_pct) - r - 6, T + 10);
+      for (let k = 0; k < 6 && placed.some((p) => x0 < p.x1 && x0 + tw > p.x0 && Math.abs(ty - p.y) < 13); k++) ty -= 13;
+      if (ty < T + 10) ty = y(d.margin_pct) + r + 13;  // no room above: below the bubble
+      placed.push({ x0, x1: x0 + tw, y: ty });
+      el("text", { x: tx, y: ty, "text-anchor": anchor, class: "val" }, svg).textContent = name;
+    });
+    return svg;
+  }
+
+  function heatmap(groups, values, upto) {
+    const W = chartW(), L = Math.round(Math.min(190, W * 0.3, 12 + Math.max(...groups.map((g) => g.length), 4) * 6.4)), R = 8, T = 4, cellH = 26, B = 22;
+    const H = T + groups.length * cellH + B, cw = (W - L - R) / 12;
+    const svg = svgBox(W, H);
+    const flat = values.flatMap((r) => r.slice(0, upto)), max = Math.max(1e-9, ...flat);
+    const steps = ["--seq-100", "--seq-200", "--seq-300", "--seq-400", "--seq-500", "--seq-600", "--seq-700"].map(css);
+    groups.forEach((g, gi) => {
+      el("text", { x: L - 8, y: T + gi * cellH + cellH / 2 + 4, "text-anchor": "end" }, svg).textContent = fit(g, L - 12);
+      for (let m = 0; m < 12; m++) {
+        const v = values[gi][m], future = m >= upto;
+        const fill = future ? css("--grid") : v <= 0 ? css("--grid") : steps[Math.min(6, Math.floor((v / max) * 6.999))];
+        const r = el("rect", { x: L + m * cw + 1, y: T + gi * cellH + 1, width: cw - 2, height: cellH - 2, rx: 3, fill }, svg);
+        r.addEventListener("mousemove", (ev) => showTip(ev, `<b>${esc(g)}</b>${row("", MONTHS[m], future ? "not yet" : money(v))}`));
+        r.addEventListener("mouseleave", hideTip);
+      }
+    });
+    MONTHS.forEach((m, i) => { el("text", { x: L + i * cw + cw / 2, y: H - 6, "text-anchor": "middle" }, svg).textContent = monthLabel(m, cw); });
+    return { svg, steps, max };
+  }
+
+  // ---- page
+  function tile(k, v, d = "", accent = "--series-1") {
+    return `<div class="tile" style="border-left-color:var(${accent})"><div class="k">${esc(k)}</div><div class="v">${v}</div><div class="d">${d}</div></div>`;
+  }
+  function delta(now, before, label, isPct = false) {
+    if (before === null || before === undefined || (!isPct && !before)) return `<span>No figures for ${esc(label)}</span>`;
+    const diff = isPct ? now - before : ((now - before) / Math.abs(before)) * 100;
+    if (Math.abs(diff) < 0.05) return `<span>Same as ${esc(label)}</span>`;
+    const up = diff > 0;
+    return `<span class="${up ? "up" : "down"}">${up ? "▲" : "▼"} ${Math.abs(diff).toFixed(1)}${isPct ? " pts" : "%"}</span> vs ${esc(label)}`;
+  }
+
+  let drawnW = 0;
+  function render() {
+    drawnW = chartW();
+    const main = $("main"), S = D.sales, yr = D.year;
+    const cmp = D.ytd ? `same days of ${yr - 1}` : String(yr - 1);
+    const period = D.ytd ? `${yr} so far` : String(yr);
+    const grp = D.group ? ` · ${D.group}` : "";
+    let html = "";
+    // tiles
+    const tiles = [];
+    if (S) {
+      const k = S.kpi;
+      tiles.push(tile(`Sales, ${period}${grp}`, `${CUR} ${short(k.sales)}`, delta(k.sales, k.sales_prev, cmp)));
+      tiles.push(tile("Gross profit", `${CUR} ${short(k.gp)}`, k.margin_pct === null ? "" : `Margin ${k.margin_pct.toFixed(1)}% · ${delta(k.margin_pct, k.margin_prev, cmp, true)}`, "--series-3"));
+      tiles.push(tile("Invoices", fmt(k.invoices, 0), delta(k.invoices, k.invoices_prev, cmp), "--series-2"));
+      tiles.push(tile("Customers who bought", fmt(k.customers, 0), delta(k.customers, k.customers_prev, cmp), "--series-4"));
+    }
+    if (D.aging) tiles.push(tile("Customers owe us", `${CUR} ${short(D.aging.owed)}`, D.aging.overdue ? `<span class="down">⚠ ${CUR} ${short(D.aging.overdue)} overdue</span>` : `<span class="up">✓ nothing overdue</span>`, "--ord-4"));
+    if (D.open_sales) tiles.push(tile("Open sales orders", fmt(D.open_sales.count, 0), `${CUR} ${short(D.open_sales.value)} still to deliver (before tax)`, "--ord-3"));
+    if (D.open_purchases) tiles.push(tile("Open purchase orders", fmt(D.open_purchases.count, 0), `${CUR} ${short(D.open_purchases.value)} still to receive (before tax)`, "--ord-3"));
+    if (D.reorder) tiles.push(tile("Stock to act on", fmt(D.reorder.to_order, 0), D.reorder.to_order ? `<span class="down">⚠ item-warehouses at risk or to reorder</span>` : `<span class="up">✓ nothing to reorder</span>`, "--ord-5"));
+    if (!tiles.length) {
+      main.innerHTML = `<div class="msg">Your role (${esc(D.role)}) does not include any of the company figures shown here. An administrator can change your access.<br><br>You can still ask the AI how to do things in SAP B1.</div>`;
+      return;
+    }
+    main.innerHTML = `<div class="tiles">${tiles.join("")}</div><div class="grid" id="cards"></div>`;
+    const cards = $("cards");
+
+    if (S) {
+      // 1. sales by month, this year vs last year
+      const hasLast = S.monthly.last.some((v) => v);
+      const lines = [{ name: String(yr), values: S.monthly.this, upto: S.last_month, color: css("--series-1") }];
+      if (hasLast) lines.push({ name: String(yr - 1), values: S.monthly.last, upto: 12, color: css("--last-year"), dash: "5 4" });
+      const c1 = card("Sales by month", hasLast ? `${yr}${D.ytd ? " so far" : ""} against ${yr - 1}${grp}` : `${yr}${D.ytd ? " so far" : ""}${grp} · no sales in ${yr - 1} to compare`,
+        { ask: `Compare sales for ${yr} with ${yr - 1}: what changed and why?`, legend: hasLast ? lines.map((l) => [l.name, l.color, 1]) : null });
+      c1.querySelector(".body").append(lineChart(MONTHS, lines, S.last_month, D.ytd));
+      c1.setTable(["Month", String(yr), String(yr - 1)], MONTHS.map((m, i) => [m, i < S.last_month ? money(S.monthly.this[i]) : "", money(S.monthly.last[i])]));
+      cards.append(c1);
+
+      // 2. top customers
+      const c2 = card("Top 10 customers", `Sales, ${period}${grp}`, { ask: "Customer insights: which customers are growing, declining or at risk?" });
+      if (S.customers.length) {
+        c2.querySelector(".body").append(hbars(S.customers.map((r) => ({ ...r, value: r.sales })), {
+          tipHtml: (r) => `<b>${esc(r.name)}</b>${row("", "Customer", r.code)}${row("", "Sales", money(r.sales))}${row("", "Gross profit", money(r.gp))}${row("", "Margin", r.sales ? (r.gp / r.sales * 100).toFixed(1) + "%" : "–")}` }));
+        c2.setTable(["Customer", "Sales", "Gross profit"], S.customers.map((r) => [r.name, money(r.sales), money(r.gp)]));
+      } else c2.querySelector(".body").innerHTML = `<div class="empty">No sales in this period.</div>`;
+      cards.append(c2);
+
+      // 3. item groups by month (stacked)
+      const colours = S.stack.map((s, i) => (s.name === "Other" ? css("--other") : css(SERIES[i])));
+      const series = S.stack.map((s, i) => ({ ...s, color: colours[i] }));
+      const c3 = card("Sales by item group", `Month by month, ${period}`, { ask: "Show product profitability by item group",
+        legend: series.map((s) => [s.name, s.color]) });
+      if (series.length) {
+        c3.querySelector(".body").append(stackedArea(series, S.last_month, D.ytd));
+        c3.setTable(["Item group"].concat(MONTHS.slice(0, S.last_month)), series.map((s) => [s.name].concat(s.values.slice(0, S.last_month).map((v) => fmt(v)))));
+      } else c3.querySelector(".body").innerHTML = `<div class="empty">No sales in this period.</div>`;
+      cards.append(c3);
+
+      // 4. items: sales vs margin
+      const c4 = card("Items: sales against margin", `Top ${S.items.length} items by sales; bubble size = quantity sold`, { ask: "Which items have the best and the worst margin, and is any margin slipping?" });
+      if (S.items.length) {
+        c4.querySelector(".body").append(scatter(S.items));
+        c4.setTable(["Item", "Sales", "Margin %", "Quantity"], S.items.map((d) => [d.name, money(d.sales), d.margin_pct.toFixed(1) + "%", fmt(d.qty, 0)]));
+      } else c4.querySelector(".body").innerHTML = `<div class="empty">No sales in this period.</div>`;
+      cards.append(c4);
+
+      // 5. heatmap
+      if (S.heat.groups.length) {
+        const c5 = card("Sales heatmap", `Item group by month, ${period} · darker = more sales`, { ask: "Which item groups sell best in which months?" });
+        const hm = heatmap(S.heat.groups, S.heat.values, S.last_month);
+        c5.querySelector(".lg").innerHTML = `<div class="legend"><span>Less</span><span style="display:inline-flex;gap:3px">${hm.steps.map((s) => `<i style="background:${s};margin-right:0"></i>`).join("")}</span><span>More (up to ${CUR} ${short(hm.max)}/month)</span></div>`;
+        c5.querySelector(".body").append(hm.svg);
+        c5.setTable(["Item group"].concat(MONTHS.slice(0, S.last_month)), S.heat.groups.map((g, i) => [g].concat(S.heat.values[i].slice(0, S.last_month).map((v) => fmt(v)))));
+        cards.append(c5);
+      }
+    }
+
+    if (D.aging) {
+      const A = D.aging, ords = ["--ord-1", "--ord-2", "--ord-3", "--ord-4", "--ord-5"].map(css);
+      const c6 = card("What customers owe, by age", `${CUR} ${fmt(A.owed)} from ${A.customers} customer${A.customers === 1 ? "" : "s"}, by days past due date`,
+        { ask: "Who owes us money and which invoices are overdue?" });
+      if (A.buckets.length) {
+        c6.querySelector(".body").append(hbars(A.buckets.map((b) => ({ ...b, value: b.amount })), {
+          color: (r, i) => ords[i], label: (r) => short(r.amount), tipHtml: (r) => `<b>${esc(r.name)}</b>${row("", "Owed", money(r.amount))}${row("", "Share", A.owed ? (r.amount / A.owed * 100).toFixed(1) + "%" : "–")}` }));
+        c6.setTable(["Age", "Owed"], A.buckets.map((b) => [b.name, money(b.amount)]));
+      } else c6.querySelector(".body").innerHTML = `<div class="empty">✓ No unpaid customer invoices.</div>`;
+      cards.append(c6);
+    }
+
+    if (D.reorder) {
+      const R = D.reorder, rows = R.statuses.filter((s) => s.count);
+      const words = { "LINE STOP RISK": "Line stop risk", "STOCKOUT RISK": "Stockout risk", "REORDER": "Reorder", "OVERSTOCK": "Overstock", "DEAD STOCK": "Not moving", "OK": "OK" };
+      const c7 = card("Stock status", `Item-warehouses by status, from the nightly stock plan (${R.as_of})`, { ask: "Which items do I need to reorder?" });
+      c7.querySelector(".body").append(hbars(rows.map((s) => ({ name: words[s.name] || s.name, value: s.count })), {
+        label: (r) => fmt(r.value, 0), tipHtml: (r) => `<b>${esc(r.name)}</b>${row("", "Item-warehouses", fmt(r.value, 0))}` }));
+      c7.setTable(["Status", "Item-warehouses"], rows.map((s) => [words[s.name] || s.name, s.count]));
+      cards.append(c7);
+    }
+  }
+
+  async function load() {
+    const q = new URLSearchParams();
+    if ($("year").value) q.set("year", $("year").value);
+    if ($("group").value) q.set("group", $("group").value);
+    $("main").classList.add("loading");
+    try {
+      const r = await fetch("/sapb1/home/data?" + q, { credentials: "include", cache: "no-store" });
+      const j = await r.json();
+      if (!r.ok || j.error) throw new Error(j.error || j.detail || "The figures could not be loaded.");
+      D = j; CUR = j.currency;
+      const hour = new Date().getHours();
+      $("hello").textContent = `${hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening"}${j.name ? ", " + j.name.split(/[ @]/)[0] : ""}`;
+      $("company").textContent = j.offline ? `${j.company} · SAP PC offline, last saved figures` : `${j.company} · figures live from SAP B1`;
+      $("year").innerHTML = j.years.map((y) => `<option ${y === j.year ? "selected" : ""}>${y}</option>`).join("");
+      if (j.sales) {
+        $("group").innerHTML = `<option value="">All item groups</option>` + j.sales.groups.map((g) => `<option ${g === j.group ? "selected" : ""}>${esc(g)}</option>`).join("");
+      }
+      $("grouplab").hidden = !j.sales;
+      $("filters").hidden = !j.sales;
+      $("note").classList.toggle("warn", !!j.offline);
+      if (j.offline) $("note").textContent = `⚠ SAP B1 can't be reached. Showing the figures saved ${j.saved_at}.`;
+      else if (!pulling) $("note").textContent = `Figures ${j.as_of} · stock plan ${j.reorder ? j.reorder.as_of : "–"}`;
+      render();
+    } catch (e) {
+      $("main").innerHTML = `<div class="msg">${esc(e.message)}</div>`;
+    } finally {
+      $("main").classList.remove("loading");
+    }
+  }
+  // ---- "Refresh data": re-read the figures now and pull the latest B1 data (stock plan, warnings) in the background
+  let pulling = false;
+  const api = (method) => fetch("/sapb1/home/refresh", { method, credentials: "include", cache: "no-store",
+    headers: method === "POST" ? { "X-Sapb1-Dashboard": "1" } : {} }).then(async (r) => {
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || j.detail || "The refresh could not be started.");
+      return j;
+    });
+  function pullDone(j) {
+    pulling = false; $("refresh").disabled = false;
+    load().then(() => {
+      if (D && D.offline) return;  // the offline notice says it already
+      if (j.result === "failed") $("note").textContent = "Could not pull from SAP B1 (is the SAP PC on?). Showing the last data.";
+      else $("note").textContent = `Pulled from SAP B1 at ${j.last_pull} · figures up to date`;
+    });
+  }
+  async function watchPull() {
+    try {
+      const j = await api("GET");
+      if (j.running) { setTimeout(watchPull, 3000); return; }
+      pullDone(j);
+    } catch (e) { pullDone({ result: "failed" }); }
+  }
+  $("refresh").onclick = async () => {
+    $("refresh").disabled = true;
+    try {
+      const j = await api("POST");
+      $("note").textContent = j.message;
+      if (j.running) { pulling = true; await load(); setTimeout(watchPull, 3000); }
+      else { await load(); $("note").textContent = j.message; $("refresh").disabled = false; }
+    } catch (e) {
+      $("note").textContent = e.message; $("refresh").disabled = false;
+    }
+  };
+
+  let rt = 0;
+  addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => { if (D && Math.abs(chartW() - drawnW) > 16) render(); }, 200); });
+  $("year").onchange = load;
+  $("group").onchange = load;
+  // redraw in the new theme (colours are read when drawing)
+  try { new MutationObserver(() => D && render()).observe(root, { attributes: true, attributeFilter: ["data-theme"] }); } catch (e) {}
+  load();
+})();
+</script>
+</body>
+</html>

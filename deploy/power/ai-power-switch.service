@@ -1,0 +1,13 @@
+[Unit]
+Description=Low CPU power while the SAP B1 AI is idle, normal power while it answers
+After=ollama.service
+
+[Service]
+ExecStart=/usr/local/bin/ai-power-switch
+# when stopped, go back to the normal setting
+ExecStopPost=/bin/sh -c 'for f in /sys/devices/system/cpu/cpu*/cpufreq/energy_performance_preference; do echo balance_performance > $f; done'
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -241,7 +241,7 @@ def verify(request: Request):
         r.headers["X-Sapb1-Groups"] = companies()[cid]
         return r
     uri = request.headers.get("x-forwarded-uri", "/")
-    if uri.startswith(("/api", "/ws", "/ollama", "/openai", "/static", "/_app")) or request.headers.get("x-forwarded-method", "GET") != "GET":
+    if uri.startswith(("/api", "/ws", "/ollama", "/openai", "/static", "/_app", "/sapb1/home/", "/sapb1/chat/")) or request.headers.get("x-forwarded-method", "GET") != "GET":
         return JSONResponse({"detail": "Not signed in"}, status_code=401)
     return RedirectResponse("/portal/login", status_code=302)
 
@@ -322,9 +322,14 @@ def cli(args: list[str]) -> None:
 
     match args:
         case ["list"]:
-            print(f"{'EMAIL':34} {'ROLE':6} {'NAME':24} COMPANIES")
+            from .access import DEFAULT_ROLE
+            print(f"{'EMAIL':34} {'ROLE':6} {'NAME':24} COMPANIES (chat role)")
             for e, u in sorted(users.items()):
-                print(f"{e:34} {u['role']:6} {u.get('name', ''):24} {'all' if u['role'] == 'admin' else ','.join(u.get('companies', [])) or '-'}")
+                if u["role"] == "admin":
+                    where = "all (manager everywhere)"
+                else:
+                    where = ", ".join(f"{c} ({(u.get('access') or {}).get(c, DEFAULT_ROLE)})" for c in u.get("companies", [])) or "-"
+                print(f"{e:34} {u['role']:6} {u.get('name', ''):24} {where}")
         case ["add", email, name, companies_csv, *rest]:
             email = email.strip().lower()
             if email in users:
@@ -348,6 +353,26 @@ def cli(args: list[str]) -> None:
             u["role"] = role
             _save_users(users)
             print(f"{email} is now {role}")
+        case ["access", email, cid, chat_role]:
+            from .access import ROLES
+            u = users.get(email.lower()) or sys.exit(f"No account {email}")
+            ids(cid)
+            if chat_role not in ROLES or chat_role == "none":
+                raise SystemExit(f"Unknown role {chat_role} (roles: {', '.join(r for r in ROLES if r != 'none')})")
+            u.setdefault("access", {})[cid] = chat_role
+            if cid not in u.get("companies", []) and u["role"] != "admin":
+                print(f"Note: {email} cannot sign in to {cid} yet (./company.sh user companies ...)")
+            _save_users(users)
+            print(f"{email} has the {chat_role} role in {cid} (applies from their next question)")
+        case ["roles"]:
+            from .access import AREA_NAMES, DOC_AREA, ROLES
+            from .b1drafts import KINDS
+            for r, (see, drafts) in ROLES.items():
+                if r != "none":
+                    from .access import can_draft
+                    kinds = [KINDS[k][1] for k in KINDS if can_draft(k, {"role": r})]
+                    print(f"{r:11} sees: {', '.join(AREA_NAMES[a] for a in AREA_NAMES if a in see)}")
+                    print(f"{'':11} B1 drafts: {', '.join(kinds) or 'none (yet)'}")
         case ["remove", email]:
             users.pop(email.lower(), None) or sys.exit(f"No account {email}")
             _save_users(users)
@@ -358,6 +383,8 @@ def cli(args: list[str]) -> None:
 ./company.sh user passwd <email>
 ./company.sh user companies <email> <company,company>
 ./company.sh user role <email> admin|user
+./company.sh user access <email> <company> manager|sales|purchasing|finance|warehouse   (what they may see in that company's chat)
+./company.sh user roles                                     (what each chat role may see)
 ./company.sh user remove <email>
 Companies: """ + ", ".join(f"{c} ({cos.get(c, 'not started')})" for c in all_ids))
 

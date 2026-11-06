@@ -34,6 +34,7 @@ from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.table import Table, TableStyleInfo
 
 from .company import COMPANY, ROOT
+from .numbers import MONEY_XL, PCT_XL, QTY_XL
 
 _SLOT = COMPANY or "default"
 EXPORT_DIR = ROOT / "exports" / _SLOT
@@ -150,7 +151,7 @@ def _tiles(ws, row: int, items: list[tuple[str, object, str]], spans: list[tuple
             c = ws.cell(r, c1, v)
             c.font, c.alignment = f, Alignment(indent=1, vertical="center", horizontal="left")
             if isinstance(v, (int, float)):
-                c.number_format = "#,##0"
+                c.number_format = QTY_XL if isinstance(v, int) else MONEY_XL  # counts whole, amounts to the cent
     ws.row_dimensions[row].height = 6
     ws.row_dimensions[row + 2].height = 34
     ws.row_dimensions[row + 3].height = 18
@@ -240,8 +241,8 @@ def _sheet(wb: Workbook, title: str, df: pd.DataFrame, report: str, subtitle: st
                               else Alignment(horizontal="left", vertical="center", indent=1))
             if kinds[c] in FORMATS:
                 cell.number_format = FORMATS[kinds[c]]
-            elif isinstance(v, float):  # figures in a mixed column (e.g. Key figures)
-                cell.number_format = FORMATS["decimal"]
+            elif isinstance(v, float):  # figures in a mixed column (e.g. Key figures): a "... %" row is a percentage
+                cell.number_format = PCT_XL if str(row[0]).rstrip().endswith("%") else MONEY_XL
                 cell.alignment = Alignment(horizontal="right", vertical="center")
             elif isinstance(v, int) and not isinstance(v, bool):
                 cell.number_format = FORMATS["int"]
@@ -302,8 +303,8 @@ def _sheet(wb: Workbook, title: str, df: pd.DataFrame, report: str, subtitle: st
 
 
 _C = "{http://schemas.openxmlformats.org/drawingml/2006/chart}"
-COMPACT = '[>=1000000]#,##0.00,,"M";[>=1000]#,##0.0,"K";#,##0'  # 12.9K, 1.23M: easy to read on a chart
-AXIS_FMT = '[>=1000000]#,##0.0,,"M";[>=1000]#,##0,"K";#,##0'  # 0, 100K, 200K
+COMPACT = "#,##0.00"  # values on charts are exact, like everywhere else (numbers.py)
+AXIS_FMT = "#,##0"  # axis steps are round numbers
 
 
 def _no_auto_title(ch: BarChart) -> BarChart:
@@ -322,6 +323,8 @@ def _no_auto_title(ch: BarChart) -> BarChart:
         for el in tree.iter():  # our label formats, not the cells' (openpyxl leaves this out, so 1,228,841.75 shows)
             if el.tag.endswith("numFmt") and el.get("sourceLinked") is None:
                 el.set("sourceLinked", "0")
+            elif el.tag.endswith("}bodyPr"):  # exact amounts stay on one line (openpyxl drops wrap="none" when saving)
+                el.set("wrap", "none")
         return tree
 
     ch._write = _write
@@ -369,6 +372,10 @@ def _chart(info: dict, spec: dict, width: float, height: float) -> BarChart | No
         x.scaling.orientation = "maxMin"  # biggest at the top
         y.delete = True
         y.majorGridlines = None
+        top = max([v for v in (ws.cell(r, vcol).value for r in range(info["header"] + 1, rows + 1))
+                   if isinstance(v, (int, float))] or [0])
+        if top > 0:
+            y.scaling.min, y.scaling.max = 0, top * 1.45  # room after the longest bar for its exact amount
         labels.showVal, labels.numFmt, labels.position, labels.txPr = True, COMPACT, "outEnd", _text(9, INK)
     else:
         # Many columns: a light amount axis, and only the best month labelled.
@@ -421,7 +428,7 @@ def _summary(wb: Workbook, report: str, subtitle: str, source: str, summary: dic
             c = ws.cell(r, b, v)
             c.font, c.alignment = f, pad
             if isinstance(v, (int, float)):
-                c.number_format = "#,##0"  # whole numbers read faster; exact figures are on the Key figures sheet
+                c.number_format = QTY_XL if isinstance(v, int) or tile.get("kind") == "int" else MONEY_XL  # exact, to the cent
                 c.alignment = Alignment(indent=1, vertical="center", horizontal="left")
     ws.row_dimensions[5].height = 6
     ws.row_dimensions[7].height = 34

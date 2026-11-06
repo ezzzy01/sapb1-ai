@@ -1,0 +1,719 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Chat</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230a6ed1'/%3E%3Ctext x='32' y='43' text-anchor='middle' font-family='Arial,Helvetica,sans-serif' font-size='30' font-weight='700' fill='%23fff'%3EB1%3C/text%3E%3C/svg%3E">
+<!-- Our own chat page (stage 1 of replacing Open WebUI): served by this company's AI service at /sapb1/chat, behind the
+     same sign-in as the rest of the site. The conversation lives in this browser tab for now (history comes in stage 2). -->
+<style>
+:root {
+  --bg: #ffffff; --surface: #f7f7f8; --surface-2: #eeeef0; --border: #e3e3e6; --text: #1f2328; --muted: #6b7280;
+  --accent: #2563eb; --accent-text: #ffffff; --user: #eef2ff; --code: #f3f4f6; --warn: #b45309;
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+:root[data-theme="dark"] {
+  --bg: #171717; --surface: #212121; --surface-2: #2a2a2a; --border: #333336; --text: #ececec; --muted: #9ca3af;
+  --accent: #3b82f6; --user: #26324a; --code: #262626; --warn: #fbbf24;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body { background: var(--bg); color: var(--text); font: 15px/1.6 var(--font); display: flex; flex-direction: column; }
+button { font: inherit; color: inherit; cursor: pointer; }
+a { color: var(--accent); }
+
+/* top bar */
+header { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--border);
+         padding-top: max(10px, env(safe-area-inset-top)); }
+header .who { flex: 1; min-width: 0; }
+header .who b { display: block; font-size: 16px; }
+header .who span { color: var(--muted); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+.btn { background: none; border: 1px solid var(--border); border-radius: 8px; padding: 6px 12px; font-size: 13.5px;
+       display: inline-flex; align-items: center; gap: 6px; text-decoration: none; color: var(--text); }
+.btn:hover { background: var(--surface); }
+.btn svg { width: 16px; height: 16px; }
+
+/* conversation */
+main { flex: 1; overflow-y: auto; scroll-behavior: smooth; }
+.col { max-width: 860px; margin: 0 auto; padding: 20px 16px 8px; }
+.welcome { text-align: center; padding: 12vh 8px 24px; }
+.welcome h1 { font-size: 26px; margin: 0 0 6px; font-weight: 600; }
+.welcome p { color: var(--muted); margin: 0 0 22px; }
+.ideas { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; max-width: 640px; margin: 0 auto; }
+.ideas button { text-align: left; background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+                padding: 12px 14px; font-size: 14px; line-height: 1.4; }
+.ideas button:hover { background: var(--surface-2); }
+.msg { margin: 0 0 22px; }
+.msg.user { display: flex; justify-content: flex-end; }
+.msg.user .bubble { background: var(--user); border-radius: 18px 18px 4px 18px; padding: 10px 16px; max-width: 80%;
+                    white-space: pre-wrap; word-wrap: break-word; }
+.msg.ai .name { font-weight: 600; font-size: 14px; margin-bottom: 4px; }
+.msg.ai .body { word-wrap: break-word; }
+.msg.ai .tools { margin-top: 6px; display: flex; gap: 4px; opacity: 0; transition: opacity .15s; }
+.msg.ai:hover .tools, .msg.ai .tools:focus-within { opacity: 1; }
+.tools button { background: none; border: 0; border-radius: 6px; padding: 4px 8px; font-size: 12.5px; color: var(--muted); }
+.tools button:hover { background: var(--surface); color: var(--text); }
+.typing { display: inline-flex; gap: 4px; padding: 6px 0; }
+.typing i { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); animation: blink 1.2s infinite; }
+.typing i:nth-child(2) { animation-delay: .2s; } .typing i:nth-child(3) { animation-delay: .4s; }
+@keyframes blink { 0%, 80%, 100% { opacity: .25; } 40% { opacity: 1; } }
+
+/* answer formatting */
+.body > :first-child { margin-top: 0; }
+.body p { margin: 0 0 10px; }
+.body h1, .body h2, .body h3, .body h4 { line-height: 1.3; margin: 18px 0 8px; }
+.body h1 { font-size: 21px; } .body h2 { font-size: 18.5px; } .body h3 { font-size: 16.5px; } .body h4 { font-size: 15px; }
+.body ul, .body ol { margin: 0 0 10px; padding-left: 24px; }
+.body li { margin: 2px 0; }
+.body blockquote { margin: 0 0 6px; padding: 0 0 0 12px; border-left: 3px solid var(--border); color: var(--muted); font-size: 14px; }
+.body blockquote p { margin: 0; }
+.body code { background: var(--code); border-radius: 5px; padding: 1px 5px; font-size: 13px; font-family: ui-monospace, Consolas, monospace; }
+.body pre { background: var(--code); border-radius: 10px; padding: 12px 14px; overflow-x: auto; }
+.body pre code { padding: 0; background: none; }
+.body hr { border: 0; border-top: 1px solid var(--border); margin: 16px 0; }
+.body img { max-width: 100%; height: auto; border-radius: 10px; display: block; margin: 8px 0; background: #fff; }
+.tablewrap { overflow-x: auto; margin: 0 0 12px; border: 1px solid var(--border); border-radius: 10px; }
+.body table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+.body th, .body td { padding: 7px 12px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+.body th { background: var(--surface); font-weight: 600; white-space: nowrap; }
+.body tr:last-child td { border-bottom: 0; }
+.body td.r, .body th.r { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.body td.c, .body th.c { text-align: center; }
+
+/* question box */
+footer { padding: 8px 16px max(14px, env(safe-area-inset-bottom)); }
+.ask { max-width: 860px; margin: 0 auto; display: flex; align-items: flex-end; gap: 8px; background: var(--surface);
+       border: 1px solid var(--border); border-radius: 22px; padding: 8px 8px 8px 16px; }
+.ask:focus-within { border-color: var(--accent); }
+.ask textarea { flex: 1; resize: none; overflow-y: auto; scrollbar-width: none; border: 0; outline: 0; background: none; color: var(--text); font: inherit;
+                max-height: 40vh; padding: 6px 0; line-height: 1.5; }
+.send { width: 36px; height: 36px; border-radius: 50%; border: 0; background: var(--accent); color: var(--accent-text);
+        display: grid; place-items: center; flex: none; }
+.send:disabled { opacity: .35; cursor: default; }
+.send svg { width: 18px; height: 18px; }
+/* stage 4: attached files */
+.ask .clip { width: 36px; height: 36px; margin-left: -8px; border: 0; border-radius: 50%; background: none; color: var(--muted);
+             display: grid; place-items: center; flex: none; }
+.ask .clip:hover { background: var(--surface-2); color: var(--text); }
+.ask .clip svg { width: 19px; height: 19px; }
+.chips { max-width: 860px; margin: 0 auto 6px; display: flex; flex-wrap: wrap; gap: 6px; }
+.chips:empty { display: none; }
+.chip { display: inline-flex; align-items: center; gap: 6px; max-width: 280px; padding: 5px 6px 5px 10px; font-size: 12.5px;
+        border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+.chip .n { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chip .k { color: var(--muted); flex: none; }
+.chip.bad { border-color: var(--warn); color: var(--warn); }
+.chip button { border: 0; background: none; color: var(--muted); width: 20px; height: 20px; border-radius: 5px; flex: none; padding: 0; }
+.chip button:hover { background: var(--border); color: var(--text); }
+.msg.user .chips { justify-content: flex-end; margin: 0 0 4px; }
+.msg.user .chip { background: var(--bg); }
+body.dropping footer .ask { border-color: var(--accent); border-style: dashed; }
+.hint { text-align: center; color: var(--muted); font-size: 12px; margin-top: 6px; }
+.err { color: var(--warn); }
+
+::-webkit-scrollbar { width: .45rem; height: .45rem; }
+::-webkit-scrollbar-thumb { background: #d7d7d799; border-radius: 9999px; }
+:root[data-theme="dark"] ::-webkit-scrollbar-thumb { background: #43434399; }
+::-webkit-scrollbar-track { background: transparent; }
+
+@media (max-width: 640px) {
+  .ideas { grid-template-columns: 1fr; }
+  .welcome { padding-top: 6vh; }
+  .msg.user .bubble { max-width: 90%; }
+  .msg.ai .tools { opacity: 1; }
+  header .btn span { display: none; }
+}
+
+/* stage 2: sidebar with saved chats, and the dashboard view */
+body { flex-direction: row; }
+.app { flex: 1; min-width: 0; display: flex; flex-direction: column; height: 100%; }
+#side { width: 260px; flex: none; height: 100%; display: flex; flex-direction: column; background: var(--surface);
+        border-right: 1px solid var(--border); }
+.side-top { padding: 12px 10px 6px; display: flex; flex-direction: column; gap: 2px; }
+.side-brand { font-weight: 600; font-size: 15px; padding: 2px 10px 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.side-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; border: 0; border-radius: 8px;
+             background: none; text-align: left; font-size: 14px; }
+.side-item svg { width: 18px; height: 18px; flex: none; }
+.side-item:hover, .side-item.on { background: var(--surface-2); }
+.list { flex: 1; overflow-y: auto; padding: 0 10px 10px; }
+.group { font-size: 12px; color: var(--muted); font-weight: 600; padding: 14px 10px 4px; }
+.chat { position: relative; display: flex; align-items: center; border-radius: 8px; }
+.chat:hover, .chat.on { background: var(--surface-2); }
+.chat > a { flex: 1; min-width: 0; padding: 7px 10px; color: var(--text); text-decoration: none; font-size: 14px;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chat .more { flex: none; width: 28px; height: 28px; margin-right: 3px; border: 0; border-radius: 6px; background: none;
+              color: var(--muted); display: grid; place-items: center; opacity: 0; }
+.chat:hover .more, .chat.on .more, .chat .more:focus-visible, .chat .more[aria-expanded="true"] { opacity: 1; }
+.chat .more:hover { background: var(--border); color: var(--text); }
+.chat input { flex: 1; min-width: 0; margin: 3px; padding: 4px 8px; font: inherit; font-size: 14px; color: var(--text);
+              background: var(--bg); border: 1px solid var(--accent); border-radius: 6px; outline: 0; }
+.pop { position: absolute; right: 4px; top: 34px; z-index: 30; min-width: 150px; padding: 4px; background: var(--bg);
+       border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.16); }
+.pop p { margin: 4px 10px 6px; font-size: 13px; }
+.pop button { display: block; width: 100%; padding: 7px 10px; border: 0; border-radius: 6px; background: none; text-align: left; font-size: 13.5px; }
+.pop button:hover { background: var(--surface); }
+.pop .danger { color: #dc2626; }
+:root[data-theme="dark"] .pop .danger { color: #f87171; }
+.empty { color: var(--muted); font-size: 13px; padding: 14px 10px; }
+.side-foot { border-top: 1px solid var(--border); padding: 10px 12px; display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.side-foot span { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.side-foot a { color: var(--muted); text-decoration: none; display: inline-flex; align-items: center; gap: 4px; }
+.side-foot a:hover { color: var(--text); }
+.side-foot svg { width: 16px; height: 16px; }
+#menu { display: none; }
+#dash { flex: 1; width: 100%; border: 0; display: none; background: var(--bg); }
+.app.dash > header, .app.dash > main, .app.dash > footer { display: none; }
+.app.dash #dash { display: block; }
+#shade { display: none; }
+/* stage 3: dashboard and chat side by side (wide screens only) */
+.app.split { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(360px, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; }
+.app.split #dash { display: block; grid-column: 1; grid-row: 1 / -1; height: 100%; border-right: 1px solid var(--border); }
+.app.split > header, .app.split > main, .app.split > footer { grid-column: 2; }
+.app.split .hint { display: none; }
+#splitBtn, #closeBtn { display: none; }
+.app:not(.split):not(.dash) #splitBtn { display: inline-flex; align-items: center; gap: 6px; }
+.app.split #closeBtn { display: inline-flex; align-items: center; gap: 6px; }
+@media (max-width: 767px) {
+  #side { position: fixed; left: 0; top: 0; bottom: 0; z-index: 40; transform: translateX(-100%); transition: transform .2s ease;
+          box-shadow: none; padding-top: env(safe-area-inset-top); }
+  body.side-open #side { transform: none; box-shadow: 0 0 40px rgba(0,0,0,.25); }
+  body.side-open #shade { display: block; position: fixed; inset: 0; z-index: 35; background: rgba(0,0,0,.35); }
+  #menu { display: inline-flex; padding: 6px 8px; }
+  .app:not(.split):not(.dash) #splitBtn { display: none; }
+  .chat .more { opacity: 1; }
+}
+</style>
+</head>
+<body>
+<aside id="side" aria-label="Chats">
+  <div class="side-top">
+    <div class="side-brand" id="brand">Chat</div>
+    <button class="side-item" id="dashBtn" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>Dashboard</button>
+    <button class="side-item" id="new" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>New chat</button>
+  </div>
+  <nav class="list" id="list"></nav>
+  <div class="side-foot"><span id="me"></span>
+    <a href="/portal/logout" title="Sign out"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>Sign out</a></div>
+</aside>
+<div id="shade"></div>
+<div class="app" id="app">
+<header>
+  <button class="btn" id="menu" type="button" title="Chats" aria-label="Open the chat list"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+  <div class="who"><b id="title">Chat</b><span id="sub"></span></div>
+  <button class="btn" id="splitBtn" type="button" title="Show the dashboard beside this chat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16"/></svg><span>Dashboard beside</span></button>
+  <button class="btn" id="closeBtn" type="button" title="Close the chat and show only the dashboard"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg><span>Close chat</span></button>
+</header>
+<main id="main"><div class="col" id="log"></div></main>
+<footer>
+  <div class="chips" id="chips"></div>
+  <form class="ask" id="form">
+    <button class="clip" id="clip" type="button" title="Attach a file: Excel, CSV, PDF, Word or text (up to 3, 10 MB each)" aria-label="Attach a file">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.4 11.1-9.2 9.2a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"/></svg></button>
+    <input type="file" id="file" multiple hidden accept=".xlsx,.xlsm,.csv,.tsv,.txt,.md,.pdf,.docx">
+    <textarea id="q" rows="1" placeholder="Ask about sales, stock, customers, suppliers…" autofocus></textarea>
+    <button class="send" id="send" type="submit" title="Send" disabled>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
+  </form>
+  <div class="hint">The AI reads live SAP B1 data. Check important figures before acting on them.</div>
+</footer>
+<iframe id="dash" title="Dashboard"></iframe>
+</div>
+<script>
+(() => {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  const root = document.documentElement;
+  const IDEAS = ["How are sales this year compared with last year?", "Which items do I need to reorder?",
+                 "Who owes us money and how much is overdue?", "Show the top 10 customers this year"];
+  let me = { assistant: "AI", company: "", name: "" };
+  let chat = null;        // the open chat {id, title, messages: [{role, content}]}; null = a new chat
+  let messages = [];      // its messages, as shown
+  let chatList = [];      // [{id, title, updated}] this person's saved chats, newest first
+  let busy = null;        // AbortController of the answer being written
+  let view = "chat";      // "chat", "dash", or "split" (dashboard and chat side by side)
+
+  // ---- theme: the same choice as the chat site (Open WebUI keeps it in localStorage.theme), else the system's
+  function theme() {
+    const t = localStorage.getItem("theme");
+    const dark = t === "dark" || t === "oled-dark" || ((!t || t === "system") && matchMedia("(prefers-color-scheme: dark)").matches);
+    root.dataset.theme = dark ? "dark" : "light";
+    root.classList.toggle("dark", dark);   // the dashboard follows the page it is shown in by this class
+  }
+  theme();
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", theme);
+
+  // ---- a small, safe Markdown renderer for the AI's answers (everything is escaped first; only safe links and images)
+  const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  const safeHref = (u) => /^(https?:\/\/|\/(?!\/)|#|mailto:)/i.test(u) ? u : "";
+  const safeSrc = (u) => /^(data:image\/(png|jpe?g|gif|webp|svg\+xml);base64,|https?:\/\/|\/(?!\/))/i.test(u) ? u : "";
+  function inline(text) {
+    const keep = [];
+    const put = (html) => "\u0000" + (keep.push(html) - 1) + "\u0000";
+    let s = text.replace(/`([^`]+)`/g, (_, c) => put("<code>" + esc(c) + "</code>"));
+    s = s.replace(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g, (m, alt, url) => {
+      const src = safeSrc(url);
+      return src ? put(`<img alt="${esc(alt)}" src="${esc(src)}" loading="lazy">`) : put(esc(alt));
+    });
+    s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (m, label, url) => {
+      const href = safeHref(url);
+      if (!href) return put(esc(label));
+      const dl = /^\/static\/exports\//.test(href) ? " download" : "";
+      const ext = /^https?:/i.test(href) ? ' target="_blank" rel="noopener noreferrer"' : "";
+      return put(`<a href="${esc(href)}"${dl}${ext}>`) + label + put("</a>");
+    });
+    s = s.replace(/https?:\/\/[^\s<>()]+[^\s<>().,;:!?'"]/g, (u) => put(`<a href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(u)}</a>`));
+    s = esc(s);
+    s = s.replace(/\*\*([^*]+?)\*\*/g, "<strong>$1</strong>").replace(/__([^_]+?)__/g, "<strong>$1</strong>");
+    s = s.replace(/(^|[^*\w])\*(?!\s)([^*]+?)\*(?!\w)/g, "$1<em>$2</em>").replace(/(^|[^_\w])_(?!\s)([^_]+?)_(?!\w)/g, "$1<em>$2</em>");
+    s = s.replace(/~~([^~]+)~~/g, "<del>$1</del>");
+    return s.replace(/\u0000(\d+)\u0000/g, (_, i) => keep[+i]);
+  }
+  const cells = (line) => line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => c.trim());
+  function md(src) {
+    const lines = src.replace(/\r\n?/g, "\n").split("\n");
+    let out = "", i = 0;
+    const isTable = (k) => /^\s*\|.*\|\s*$/.test(lines[k] || "") && /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/.test(lines[k + 1] || "");
+    const listRe = /^(\s*)([-*+]|\d+[.)])\s+(.*)$/;
+    while (i < lines.length) {
+      const line = lines[i];
+      if (!line.trim()) { i++; continue; }
+      let m;
+      if ((m = line.match(/^\s*(```|~~~)/))) {                      // code block
+        const fence = m[1], body = [];
+        for (i++; i < lines.length && !lines[i].trim().startsWith(fence); i++) body.push(lines[i]);
+        i++; out += "<pre><code>" + esc(body.join("\n")) + "</code></pre>"; continue;
+      }
+      if ((m = line.match(/^\s*(#{1,6})\s+(.*?)\s*#*\s*$/))) { const n = m[1].length; out += `<h${n}>${inline(m[2])}</h${n}>`; i++; continue; }
+      if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(line)) { out += "<hr>"; i++; continue; }
+      if (isTable(i)) {                                             // table
+        const head = cells(lines[i]), align = cells(lines[i + 1]).map((c) => /:$/.test(c) ? (/^:/.test(c) ? "c" : "r") : "");
+        const cls = (k) => align[k] ? ` class="${align[k]}"` : "";
+        let t = "<thead><tr>" + head.map((c, k) => `<th${cls(k)}>${inline(c)}</th>`).join("") + "</tr></thead><tbody>";
+        for (i += 2; i < lines.length && /^\s*\|/.test(lines[i]); i++)
+          t += "<tr>" + cells(lines[i]).map((c, k) => `<td${cls(k)}>${inline(c)}</td>`).join("") + "</tr>";
+        out += `<div class="tablewrap"><table>${t}</tbody></table></div>`; continue;
+      }
+      if (/^\s*>/.test(line)) {                                     // quote (the AI's "checking…" lines)
+        const body = [];
+        for (; i < lines.length && /^\s*>/.test(lines[i]); i++) body.push(lines[i].replace(/^\s*>\s?/, ""));
+        out += "<blockquote>" + md(body.join("\n")) + "</blockquote>"; continue;
+      }
+      if ((m = line.match(listRe))) {                               // list (nested by indentation)
+        const indent = m[1].length, ordered = /\d/.test(m[2]);
+        let html = "";
+        while (i < lines.length) {
+          const lm = lines[i].match(listRe);
+          if (!lm || lm[1].length < indent || (lm[1].length === indent && /\d/.test(lm[2]) !== ordered)) break;
+          if (lm[1].length > indent) break;
+          const sub = [];
+          let first = lm[3];
+          for (i++; i < lines.length; i++) {
+            const l = lines[i], nm = l.match(listRe);
+            if (!l.trim()) { if ((lines[i + 1] || "").match(/^\s+\S/) && (lines[i + 1].match(/^(\s*)/)[1].length > indent)) { sub.push(""); continue; } break; }
+            if (nm && nm[1].length <= indent) break;
+            if (!nm && !/^\s/.test(l)) { first += " " + l.trim(); continue; }
+            sub.push(l);
+          }
+          const minIndent = Math.min(...sub.filter((l) => l.trim()).map((l) => l.match(/^(\s*)/)[1].length), 99);
+          html += "<li>" + inline(first) + (sub.length ? md(sub.map((l) => l.slice(Math.min(minIndent, l.match(/^(\s*)/)[1].length))).join("\n")) : "") + "</li>";
+        }
+        out += ordered ? `<ol>${html}</ol>` : `<ul>${html}</ul>`; continue;
+      }
+      const para = [];                                              // paragraph (single line breaks kept)
+      for (; i < lines.length && lines[i].trim() && !/^\s*(#{1,6}\s|>|```|~~~)/.test(lines[i]) && !listRe.test(lines[i]) && !isTable(i); i++)
+        para.push(lines[i].trim());
+      if (!para.length) { para.push(lines[i].trim()); i++; }
+      out += "<p>" + para.map(inline).join("<br>") + "</p>";
+    }
+    return out;
+  }
+
+  // ---- drawing the conversation
+  const log = $("log"), main = $("main");
+  const atBottom = () => main.scrollHeight - main.scrollTop - main.clientHeight < 80;
+  const toBottom = () => { main.scrollTop = main.scrollHeight; };
+  function welcome() {
+    const hour = new Date().getHours();
+    const hi = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
+    log.innerHTML = `<div class="welcome"><h1>${hi}${me.name ? ", " + esc(me.name.split(/[ @]/)[0]) : ""}</h1>
+      <p>Ask ${esc(me.assistant)} about your SAP B1 data.</p><div class="ideas"></div></div>`;
+    const box = log.querySelector(".ideas");
+    for (const idea of IDEAS) {
+      const b = document.createElement("button"); b.type = "button"; b.textContent = idea;
+      b.onclick = () => ask(idea); box.append(b);
+    }
+  }
+  function addUser(text, files) {
+    const d = document.createElement("div"); d.className = "msg user";
+    d.innerHTML = (files && files.length ? `<div class="chips">${files.map((f) => chipHTML(f)).join("")}</div>` : "") + `<div class="bubble"></div>`;
+    d.querySelector(".bubble").textContent = text; log.append(d);
+  }
+  function chipHTML(f, remove) {
+    const k = f.state === "reading" ? "reading…" : f.state === "bad" ? "" : f.kind || "";
+    return `<span class="chip${f.state === "bad" ? " bad" : ""}" title="${esc(f.error || (f.cut ? "Only the first part of this file is read" : f.name))}">` +
+      `<span class="n">${esc(f.error ? f.name + ": " + f.error : f.name)}</span>${k ? `<span class="k">${esc(k)}</span>` : ""}` +
+      (remove ? `<button type="button" data-key="${f.key}" title="Remove" aria-label="Remove ${esc(f.name)}">✕</button>` : "") + `</span>`;
+  }
+  function addAI(text, done) {
+    const d = document.createElement("div"); d.className = "msg ai";
+    d.innerHTML = `<div class="name"></div><div class="body"></div>`;
+    d.querySelector(".name").textContent = me.assistant;
+    log.append(d);
+    paint(d, text, done);
+    return d;
+  }
+  function paint(d, text, done) {
+    const body = d.querySelector(".body");
+    body.innerHTML = text ? md(text) : "";
+    if (!done) body.insertAdjacentHTML("beforeend", `<div class="typing"><i></i><i></i><i></i></div>`);
+    body.querySelectorAll("table").forEach((t) => {               // right-align columns of figures
+      const rows = [...t.rows].slice(1);
+      [...(t.rows[0] || { cells: [] }).cells].forEach((th, k) => {
+        if (th.className) return;
+        const vals = rows.map((r) => (r.cells[k] || {}).textContent || "").filter((v) => v.trim() && v.trim() !== "-");
+        if (vals.length && vals.every((v) => /^[-+(]?\s*([A-Z]{2,3}\s?)?[-+]?[\d.,]+\s?%?\)?$|^RM\s?[-\d.,]+$/.test(v.trim()))) {
+          th.classList.add("r"); rows.forEach((r) => r.cells[k] && r.cells[k].classList.add("r"));
+        }
+      });
+    });
+    if (done && !d.querySelector(".tools")) {
+      const tools = document.createElement("div"); tools.className = "tools";
+      const copy = document.createElement("button"); copy.type = "button"; copy.textContent = "Copy";
+      copy.onclick = async () => {
+        try { await navigator.clipboard.writeText(text.replace(/^> 🔎.*\n?/gm, "").replace(/!\[[^\]]*\]\(data:[^)]*\)/g, "").trim());
+              copy.textContent = "Copied"; } catch (e) { copy.textContent = "Could not copy"; }
+        setTimeout(() => (copy.textContent = "Copy"), 1500);
+      };
+      tools.append(copy); d.append(tools);
+    }
+  }
+  function redrawAll() {
+    if (!messages.length) return welcome();
+    log.innerHTML = "";
+    for (const m of messages) m.role === "user" ? addUser(m.content, m.files) : addAI(m.content, true);
+    toBottom();
+  }
+
+  // ---- talking to the server
+  const CHANGE = { "Content-Type": "application/json", "X-Sapb1-Chat": "1" };
+  async function api(path, opts = {}) {
+    const r = await fetch(path, Object.assign({ credentials: "include", cache: "no-store" }, opts));
+    if (r.status === 401) { location.href = "/portal/login"; throw new Error("Your sign-in has ended."); }
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.detail || j.error || "The chat service could not be reached.");
+    return j;
+  }
+
+  // ---- the sidebar: Dashboard, New chat, saved chats grouped by date
+  const list = $("list");
+  function groupName(t) {
+    const d = new Date(t * 1000), now = new Date();
+    const day = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+    const days = Math.round((day(now) - day(d)) / 86400000);
+    if (days <= 0) return "Today";
+    if (days === 1) return "Yesterday";
+    if (days < 7) return "Previous 7 days";
+    if (days < 30) return "Previous 30 days";
+    return d.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+  }
+  function drawList() {
+    list.innerHTML = "";
+    if (!chatList.length) { list.innerHTML = `<div class="empty">Your chats will appear here.</div>`; return; }
+    let last = "";
+    for (const c of chatList) {
+      const g = groupName(c.updated);
+      if (g !== last) { const h = document.createElement("div"); h.className = "group"; h.textContent = g; list.append(h); last = g; }
+      const row = document.createElement("div");
+      row.className = "chat" + (chat && chat.id === c.id && view !== "dash" ? " on" : "");
+      row.dataset.id = c.id;
+      const a = document.createElement("a");
+      a.href = "?c=" + encodeURIComponent(c.id); a.textContent = c.title; a.title = c.title;
+      a.onclick = (e) => { if (e.ctrlKey || e.metaKey || e.shiftKey || e.button) return; e.preventDefault(); openChat(c.id, true); };
+      const more = document.createElement("button");
+      more.className = "more"; more.type = "button"; more.title = "Rename or delete"; more.setAttribute("aria-expanded", "false");
+      more.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>`;
+      more.onclick = (e) => { e.stopPropagation(); menuFor(row, c, more); };
+      row.append(a, more); list.append(row);
+    }
+  }
+  async function loadList() {
+    try { chatList = (await api("/sapb1/chat/list")).chats; } catch (e) { return; }
+    drawList();
+  }
+  function closePop() {
+    document.querySelectorAll(".pop").forEach((p) => p.remove());
+    document.querySelectorAll('.more[aria-expanded="true"]').forEach((b) => b.setAttribute("aria-expanded", "false"));
+  }
+  document.addEventListener("click", (e) => { if (!e.target.closest(".pop")) closePop(); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closePop(); document.body.classList.remove("side-open"); } });
+  function menuFor(row, c, more) {
+    const open = more.getAttribute("aria-expanded") === "true";
+    closePop();
+    if (open) return;
+    more.setAttribute("aria-expanded", "true");
+    const pop = document.createElement("div"); pop.className = "pop";
+    const item = (label, fn, cls) => { const b = document.createElement("button"); b.type = "button"; b.textContent = label;
+                                       if (cls) b.className = cls; b.onclick = (e) => { e.stopPropagation(); fn(); }; pop.append(b); };
+    item("Rename", () => { closePop(); renameRow(row, c); });
+    item("Delete", () => {                                      // asks first, inside the menu
+      pop.innerHTML = "<p>Delete this chat?</p>";
+      item("Delete", () => removeChat(c), "danger");
+      item("Cancel", closePop);
+    }, "danger");
+    row.append(pop);
+  }
+  function renameRow(row, c) {
+    const a = row.querySelector("a"), input = document.createElement("input");
+    input.value = c.title; input.maxLength = 80; input.setAttribute("aria-label", "Chat name");
+    a.replaceWith(input); input.focus(); input.select();
+    let done = false;
+    const finish = async (save) => {
+      if (done) return; done = true;
+      const title = input.value.trim();
+      if (save && title && title !== c.title) {
+        try { await api("/sapb1/chat/c/" + encodeURIComponent(c.id), { method: "PATCH", headers: CHANGE, body: JSON.stringify({ title }) });
+              c.title = title; if (chat && chat.id === c.id) { chat.title = title; setTitle(); } } catch (e) {}
+      }
+      drawList();
+    };
+    input.onkeydown = (e) => { if (e.key === "Enter") finish(true); if (e.key === "Escape") { e.stopPropagation(); finish(false); } };
+    input.onblur = () => finish(true);
+  }
+  async function removeChat(c) {
+    closePop();
+    try { await api("/sapb1/chat/c/" + encodeURIComponent(c.id), { method: "DELETE", headers: CHANGE }); } catch (e) { return; }
+    chatList = chatList.filter((x) => x.id !== c.id);
+    if (chat && chat.id === c.id) newChat(true); else drawList();
+  }
+
+  // ---- what is shown: a chat (new or saved) or the dashboard; the address follows, so Back and reload work
+  function setTitle() {
+    document.title = view === "dash" ? `Dashboard · ${me.assistant}` : chat ? `${chat.title} · ${me.assistant}` : me.assistant;
+    $("title").textContent = chat && view !== "dash" ? chat.title : me.assistant;
+    $("sub").textContent = chat && view !== "dash" ? me.assistant : [me.company, me.name].filter(Boolean).join(" · ");
+  }
+  const phone = () => innerWidth < 768;
+  function addr(v, id) {                                         // the address of a view
+    if (v === "dash") return "/sapb1/chat?view=dashboard";
+    const p = new URLSearchParams();
+    if (v === "split") p.set("view", "split");
+    if (id) p.set("c", id);
+    const q = p.toString();
+    return "/sapb1/chat" + (q ? "?" + q : "");
+  }
+  function go(url, push) { if (push && location.pathname + location.search !== url) history.pushState(null, "", url); }
+  function showView(v) {
+    view = v;
+    $("app").classList.toggle("dash", v === "dash");
+    $("app").classList.toggle("split", v === "split");
+    $("dashBtn").classList.toggle("on", v === "dash");
+    $("dashBtn").setAttribute("aria-pressed", String(v === "dash"));
+    if (v !== "chat" && !$("dash").src.includes("/sapb1/home")) $("dash").src = "/sapb1/home";
+    document.body.classList.remove("side-open");
+    drawList(); setTitle(); tellDash();
+  }
+  function stopAnswer() { if (busy) busy.abort(); }
+  function newChat(push, v = "chat") {
+    stopAnswer();
+    chat = null; messages = [];
+    go(addr(v), push); showView(v); welcome(); $("q").focus();
+  }
+  async function openChat(id, push, v = "chat") {
+    stopAnswer();
+    go(addr(v, id), push);
+    showView(v);
+    log.innerHTML = "";
+    try {
+      chat = await api("/sapb1/chat/c/" + encodeURIComponent(id));
+      messages = chat.messages;
+    } catch (e) {
+      chat = null; messages = [];
+      welcome();
+      log.insertAdjacentHTML("afterbegin", `<p class="err" style="text-align:center">${esc(e.message)}</p>`);
+      history.replaceState(null, "", addr(view));
+      drawList(); setTitle(); return;
+    }
+    redrawAll(); drawList(); setTitle();
+  }
+  function showDash(push) { stopAnswer(); go(addr("dash"), push); showView("dash"); }
+  // the open chat goes beside the dashboard, or back to full width; an answer being written carries on
+  function setSplit(v, push) { go(addr(v, chat && chat.id), push); showView(v); }
+  function route() {
+    const p = new URLSearchParams(location.search);
+    const v = p.get("view") === "split" && !phone() ? "split" : "chat";
+    if (p.get("view") === "dashboard") showDash(false);
+    else if (chat && chat.id === p.get("c")) setSplit(v, false);
+    else if (p.get("c")) openChat(p.get("c"), false, v);
+    else newChat(false, v);
+  }
+  addEventListener("popstate", route);
+  $("new").onclick = () => newChat(true);
+  $("dashBtn").onclick = () => showDash(true);
+  $("splitBtn").onclick = () => setSplit("split", true);
+  $("closeBtn").onclick = () => showDash(true);
+  $("menu").onclick = () => document.body.classList.add("side-open");
+  $("shade").onclick = () => document.body.classList.remove("side-open");
+
+  // ---- the dashboard (its own page, /sapb1/home, shown in a frame): its questions open a new chat here
+  function tellDash() {
+    if (view === "chat") return;
+    try { $("dash").contentWindow.postMessage({ sapb1: true, mode: view, narrow: phone(), menu: phone() }, location.origin); } catch (e) {}
+  }
+  $("dash").addEventListener("load", tellDash);
+  addEventListener("resize", () => {
+    if (view === "split" && phone()) { history.replaceState(null, "", addr("chat", chat && chat.id)); showView("chat"); }  // too narrow for both
+    else tellDash();
+  });
+  addEventListener("message", (e) => {
+    if (e.origin !== location.origin || e.source !== $("dash").contentWindow || !e.data || !e.data.sapb1) return;
+    if (e.data.action === "menu") document.body.classList.add("side-open");
+    if (e.data.action === "ask" && e.data.text) { newChat(true); ask(String(e.data.text)); }
+    if (e.data.action === "view" && e.data.view === "dash") showDash(true);
+    if (e.data.action === "view" && e.data.view === "split" && !phone()) {   // the dashboard's "Side by side" picker
+      const id = String(e.data.chat || "new");
+      if (id === "new") newChat(true, "split");
+      else if (chat && chat.id === id) setSplit("split", true);
+      else openChat(id, true, "split");
+    }
+  });
+
+  // ---- asking
+  async function ask(text) {
+    text = text.trim();
+    if (busy || attached.some((f) => f.state === "reading")) return;
+    const files = attached.filter((f) => f.state === "ready").map((f) => ({ id: f.id, name: f.name, kind: f.kind }));
+    if (!text && files.length) text = files.length === 1 ? "Please look at the attached file." : "Please look at the attached files.";
+    if (!text) return;
+    attached = []; drawChips();
+    if (!messages.length) log.innerHTML = "";
+    messages.push({ role: "user", content: text, files }); addUser(text, files);
+    $("q").value = ""; grow(); setBusy(true);
+    const d = addAI("", false); toBottom();
+    let answer = "", pending = false, finished = false;
+    const draw = () => { pending = false; if (finished) return; const stick = atBottom(); paint(d, answer, false); if (stick) toBottom(); };
+    const mine = new AbortController(); busy = mine;
+    try {
+      const r = await fetch("/sapb1/chat/send", { method: "POST", credentials: "include", cache: "no-store", signal: mine.signal,
+        headers: CHANGE, body: JSON.stringify({ chat_id: chat ? chat.id : null, question: text, files: files.map((f) => f.id) }) });
+      if (r.status === 401) throw new Error("signin");
+      if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.detail || j.error || "The AI could not be reached."); }
+      const reader = r.body.getReader(), dec = new TextDecoder();
+      let buf = "";
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        let k;
+        while ((k = buf.indexOf("\n\n")) >= 0) {
+          const ev = buf.slice(0, k); buf = buf.slice(k + 2);
+          const data = ev.replace(/^data: ?/gm, "");
+          if (data === "[DONE]") continue;
+          let j = {};
+          try { j = JSON.parse(data); } catch (e) {}
+          if (j.chat && !chat) {                                    // a new chat has been saved: it gets its address and list entry
+            chat = { id: j.chat, title: j.title, messages };
+            history.replaceState(null, "", addr(view, j.chat));
+            chatList.unshift({ id: j.chat, title: j.title, updated: Date.now() / 1000 });
+            drawList(); setTitle();
+          }
+          answer += j.t || "";
+        }
+        if (!pending) { pending = true; requestAnimationFrame(draw); }
+      }
+    } catch (e) {
+      if (e.name === "AbortError") answer += (answer ? "\n\n" : "") + "*Stopped.*";
+      else if (e.message === "signin") answer += `\n\n**Your sign-in has ended.** [Sign in again](/portal/login), then ask again.`;
+      else answer += `\n\n**${e.message || "The AI could not be reached."}** Please try again in a minute.`;
+    }
+    finished = true;
+    if (busy === mine) busy = null;
+    answer = answer.trim() || "*(No answer was generated. Please rephrase or ask again.)*";
+    if (d.isConnected) {                                           // still on this chat (not switched away)
+      const stick = atBottom();
+      paint(d, answer, true); if (stick) toBottom();
+      messages.push({ role: "assistant", content: answer });
+      setBusy(false); $("q").focus();
+    } else if (!busy) setBusy(false);
+    loadList();
+  }
+  const SEND = $("send").innerHTML;
+  const STOP = `<svg viewBox="0 0 24 24" fill="currentColor"><rect x="7" y="7" width="10" height="10" rx="2"/></svg>`;
+  function setBusy(on) {
+    $("send").innerHTML = on ? STOP : SEND;
+    $("send").title = on ? "Stop" : "Send";
+    $("send").disabled = !on && !canSend();
+  }
+  function canSend() {
+    return !attached.some((f) => f.state === "reading") && (!!$("q").value.trim() || attached.some((f) => f.state === "ready"));
+  }
+  function grow() { const q = $("q"); q.style.height = "auto"; q.style.height = Math.min(q.scrollHeight, innerHeight * 0.4) + "px";
+                    if (!busy) $("send").disabled = !canSend(); }
+
+  // ---- attaching files: each is read on the server right away; only its text is kept, with the question
+  const KINDS = /\.(xlsx|xlsm|csv|tsv|txt|md|pdf|docx)$/i, MAX_FILES = 3, MAX_MB = 10;
+  let attached = [], fileKey = 0;   // [{key, name, state: "reading" | "ready" | "bad", id, kind, cut, error}]
+  function drawChips() {
+    $("chips").innerHTML = attached.map((f) => chipHTML(f, true)).join("");
+    if (!busy) $("send").disabled = !canSend();
+  }
+  $("chips").onclick = (e) => {
+    const b = e.target.closest("button[data-key]");
+    if (b) { attached = attached.filter((f) => String(f.key) !== b.dataset.key); drawChips(); $("q").focus(); }
+  };
+  async function attach(file) {
+    const f = { key: ++fileKey, name: file.name, state: "reading" };
+    if (attached.filter((x) => x.state !== "bad").length >= MAX_FILES) Object.assign(f, { state: "bad", error: `at most ${MAX_FILES} files per question` });
+    else if (/\.xls$/i.test(file.name)) Object.assign(f, { state: "bad", error: "save it as .xlsx first" });
+    else if (!KINDS.test(file.name)) Object.assign(f, { state: "bad", error: "use Excel, CSV, PDF, Word or text files" });
+    else if (file.size > MAX_MB * 1024 * 1024) Object.assign(f, { state: "bad", error: `bigger than ${MAX_MB} MB` });
+    attached.push(f); drawChips();
+    if (f.state === "bad") return;
+    try {
+      const body = new FormData(); body.append("file", file);
+      const r = await fetch("/sapb1/chat/upload", { method: "POST", credentials: "include", headers: { "X-Sapb1-Chat": "1" }, body });
+      if (r.status === 401) { location.href = "/portal/login"; return; }
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.detail || "could not be read");
+      Object.assign(f, { state: "ready", id: j.id, kind: j.kind, cut: j.cut });
+    } catch (e) { Object.assign(f, { state: "bad", error: String(e.message || "could not be read").replace(/\.$/, "") }); }
+    if (attached.includes(f)) drawChips();
+  }
+  const attachAll = (list) => { for (const file of list) attach(file); $("q").focus(); };
+  $("clip").onclick = () => $("file").click();
+  $("file").onchange = () => { attachAll([...$("file").files]); $("file").value = ""; };
+  $("q").addEventListener("paste", (e) => { const fl = [...(e.clipboardData?.files || [])]; if (fl.length) { e.preventDefault(); attachAll(fl); } });
+  let dragDepth = 0;   // drop files anywhere on the chat
+  const hasFiles = (e) => [...(e.dataTransfer?.types || [])].includes("Files");
+  addEventListener("dragenter", (e) => { if (hasFiles(e) && view !== "dash") { dragDepth++; document.body.classList.add("dropping"); } });
+  addEventListener("dragleave", () => { if (--dragDepth <= 0) { dragDepth = 0; document.body.classList.remove("dropping"); } });
+  addEventListener("dragover", (e) => { if (hasFiles(e)) e.preventDefault(); });
+  addEventListener("drop", (e) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault(); dragDepth = 0; document.body.classList.remove("dropping");
+    if (view !== "dash") attachAll([...e.dataTransfer.files]);
+  });
+  $("q").addEventListener("input", grow);
+  $("q").addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey && !e.isComposing && !matchMedia("(pointer: coarse)").matches) { e.preventDefault(); $("form").requestSubmit(); }
+  });
+  $("form").onsubmit = (e) => { e.preventDefault(); busy ? busy.abort() : ask($("q").value); };
+
+  // ---- start
+  if (innerWidth < 640) $("q").placeholder = "Ask a question…";
+  route();
+  loadList();
+  fetch("/sapb1/chat/me", { credentials: "include", cache: "no-store" }).then((r) => r.ok ? r.json() : Promise.reject(r.status))
+    .then((j) => {
+      me = j;
+      $("brand").textContent = j.assistant;
+      $("me").textContent = j.name || "";
+      setTitle();
+      if (!messages.length && !busy && view === "chat") welcome();  // greet by name
+      document.querySelectorAll(".msg.ai .name").forEach((n) => (n.textContent = j.assistant));
+    })
+    .catch((s) => { if (s === 401) location.href = "/portal/login"; });
+})();
+</script>
+</body>
+</html>

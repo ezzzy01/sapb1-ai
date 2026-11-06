@@ -1,0 +1,17 @@
+#!/bin/bash
+# Low power while the AI is idle; normal power while it is answering.
+# "Answering" = Ollama has a model loaded (it unloads OLLAMA_KEEP_ALIVE after the last question).
+IDLE=power            # CPU energy preference when nobody is using the AI
+BUSY=balance_performance
+set_epp() {
+    for f in /sys/devices/system/cpu/cpu*/cpufreq/energy_performance_preference; do echo "$1" > "$f" 2>/dev/null; done
+}
+current=""
+while true; do
+    if curl -s -m 2 http://127.0.0.1:11434/api/ps | grep -q '"name"'; then want=$BUSY; else want=$IDLE; fi
+    if [ "$want" != "$current" ]; then
+        set_epp "$want"; current=$want
+        echo "AI $([ "$want" = "$BUSY" ] && echo busy || echo idle): CPU energy preference -> $want"
+    fi
+    sleep 3
+done

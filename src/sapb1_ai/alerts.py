@@ -64,10 +64,12 @@ def push(alerts: dict) -> None:
         print(f"Pushed to webhook ({len(alerts['items'])} items)")
 
 
-def main() -> None:
+def main(send: bool = True) -> None:
     alerts = build()
     (DATA_DIR / "alerts.json").write_text(json.dumps(alerts, indent=2))
     print(message(alerts)[0])
+    if not send:  # "Refresh data" on the dashboard: update the warnings, but the pushes stay nightly
+        return
     try:
         push(alerts)
     except httpx.HTTPError as e:
@@ -75,4 +77,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+    main(send="--no-push" not in sys.argv[1:])

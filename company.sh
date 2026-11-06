@@ -27,19 +27,11 @@ need() { [[ -f $(env_of "$1") ]] || die "unknown company '$1' (see ./company.sh 
 started() { for id in $(ids); do systemctl --user is-enabled --quiet "sapb1-ai-agent@$id" && echo "$id"; done; return 0; }
 dc() { docker compose -f "$ROOT/docker-compose.yml" -f "$ROOT/site/docker-compose.companies.yml" "$@"; }
 
-sync_site() {  # one chat site per started company, behind the shared sign-in
-  local ids id i
-  ids=$(cd "$ROOT" && uv run --frozen python -m sapb1_ai.site build)
+sync_site() {  # the proxy sends each signed-in person to their company's own chat page (/sapb1/chat)
+  (cd "$ROOT" && uv run --frozen python -m sapb1_ai.site build) >/dev/null
   systemctl --user is-active --quiet sapb1-ai-portal || die "the sign-in service is not running (./company.sh install)"
   dc up -d 2>&1 | grep -v -i orphan || true
   docker exec sapb1-ai-proxy caddy reload --config /etc/caddy/Caddyfile >/dev/null 2>&1 || docker restart sapb1-ai-proxy >/dev/null
-  for id in $ids; do
-    for i in $(seq 120); do
-      [[ $(docker inspect -f '{{.State.Health.Status}}' "sapb1-ai-webui-$id" 2>/dev/null) == healthy ]] && break
-      sleep 1
-    done
-  done
-  [[ -n $ids ]] && (cd "$ROOT" && uv run --frozen python -m sapb1_ai.webui register $ids)
   return 0
 }
 
